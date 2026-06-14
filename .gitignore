@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+# local cache + mounted libraries (never commit comics)
+cache/
+comics/
+manga/
+libraries/
+cascade.toml
+*.sqlite3
+.DS_Store

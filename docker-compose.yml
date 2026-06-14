@@ -1,0 +1,24 @@
+# Comic Cascade — generic example deployment.
+#
+# This app has NO authentication. Do not expose it directly to the internet;
+# put it behind your own reverse proxy / SSO if it needs to be reachable remotely.
+#
+# Libraries: with no config file, every immediate subdirectory of /libraries
+# becomes a library automatically (here: "comics"). Alternatively mount a
+# cascade.toml (see cascade.example.toml) or set CASCADE_LIBRARY for a single folder.
+services:
+  comic-cascade:
+    build: .
+    image: comic-cascade:local
+    container_name: comic-cascade
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./comics:/libraries/comics:ro       # point this at your comics folder (read-only)
+      # - ./manga:/libraries/manga:ro        # add as many libraries as you like
+      # - ./cascade.toml:/app/cascade.toml:ro # optional explicit multi-library config
+      - cascade-cache:/cache                 # extracted-page cache (disk, LRU-bounded)
+    restart: unless-stopped
+
+volumes:
+  cascade-cache:

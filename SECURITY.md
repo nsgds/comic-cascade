@@ -1,0 +1,49 @@
+# Security
+
+## Reporting a vulnerability
+
+Please report security issues privately via **GitHub Security Advisories**
+("Report a vulnerability" on the repository's Security tab) rather than a public
+issue. You'll get a response as soon as is practical for a hobby project.
+
+## Threat model
+
+Comic Cascade is a **read-only** comic reader with **no built-in authentication —
+by design**. It binds a port and expects to be fronted by your own reverse proxy
+/ SSO if you need access control (see the README "Security" section). "Add
+authentication" is therefore intentionally out of scope for the app itself.
+
+What the app *does* defend against — even for an allowed/LAN user, and for an
+**untrusted comic file** placed in a library (e.g. on a shared NAS):
+
+- **Path traversal** — every library/path is resolved and confined to its root
+  (`app/paths.py`); requests can't read files outside the configured libraries.
+- **Zip-Slip** — extracted pages are written by index (`00000.jpg` …), never using
+  archive-internal names as output paths.
+- **Symlink smuggling** — symlinks inside a RAR/7z are never followed or served;
+  only regular files that resolve *inside* the extraction dir are used.
+- **Decompression bombs** — extraction is capped by `max_archive_bytes` (total
+  uncompressed) and PDFs by `max_pdf_pages`; oversized comics are rejected `422`.
+- **Command injection** — `unar` is run with an argument list (never a shell) and a
+  `--` end-of-options separator; a single output file is size-limited via `RLIMIT_FSIZE`.
+- **SQL injection** — all cache-index queries are parameterized.
+- **Info disclosure** — `/api/healthz` reports readiness only (no host paths) and
+  extraction errors are logged server-side, not returned to clients.
+- **Container** — the image runs as a non-root user; responses send
+  `X-Content-Type-Options: nosniff`.
+
+## Known limitations
+
+- **Cache eviction race:** under heavy concurrent extraction pressure, an archive
+  being streamed by an in-flight `/api/page` request can be evicted, yielding a
+  retriable error for that page (no data loss). A simple retry succeeds.
+- **Decompression-bomb residual (many tiny files):** the per-comic byte cap plus a
+  512 MB free-space floor bound disk use, but a pathological many-files archive may
+  briefly consume disk before being rolled back.
+- **Directory picker exposure:** when `CASCADE_BROWSE_ROOT` is set (UI library
+  management), the picker exposes that root's directory structure to anyone who can
+  reach the app. Keep it unset for unauthenticated installs.
+
+## Supported versions
+
+Security fixes target the latest `0.1.x` release.

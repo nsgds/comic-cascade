@@ -1,0 +1,14 @@
+.git
+.gitignore
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+cache/
+comics/
+manga/
+libraries/
+cascade.toml
+tests/
+*.md
+.DS_Store

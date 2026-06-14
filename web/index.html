@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0a0a0a">
+  <!-- apply the saved theme before first paint (no flash) -->
+  <script>
+    try { document.documentElement.setAttribute("data-theme", localStorage.getItem("cc.theme") === "light" ? "light" : "dark"); } catch (e) {}
+  </script>
+  <title>Comic Cascade</title>
+  <link rel="icon" href="/favicon.ico" sizes="32x32">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <header id="topbar">
+    <a class="brand" href="#/"><img class="brand-logo" src="/favicon.svg" alt=""> Comic&nbsp;Cascade</a>
+    <select id="library-select" aria-label="Library" hidden></select>
+    <button id="manage-btn" class="icon-btn" title="Manage libraries" hidden>⚙</button>
+    <button id="theme-btn" class="icon-btn" title="Toggle light/dark">☀</button>
+    <label class="toggle" id="show-all-label">
+      <input type="checkbox" id="show-all"> show all files
+    </label>
+  </header>
+  <main id="view"></main>
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>

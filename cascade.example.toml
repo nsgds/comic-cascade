@@ -1,0 +1,33 @@
+# Comic Cascade configuration (OPTIONAL). See CONFIG.md for the full reference.
+#
+# Library resolution order (first source that yields a library wins):
+#   1. This file, if present (path from $CASCADE_CONFIG, or ./cascade.toml,
+#      /app/cascade.toml, /config/cascade.toml).
+#   2. else $CASCADE_LIBRARY            -> a single library named "Library".
+#   3. else each subdirectory of /libraries becomes a library.
+#   4. else a folder mounted at /library -> a single library named "Library".
+#
+# All library paths are read-only; Comic Cascade never writes into them.
+
+[[library]]
+name = "Comics"
+path = "/libraries/comics"
+
+# [[library]]
+# name = "Manga"
+# path = "/libraries/manga"
+
+[cache]
+# Where extracted pages are cached (must be writable; use a disk volume, not tmpfs).
+dir = "/cache"
+# Soft cap on cache size in bytes; least-recently-read archives are evicted past this.
+budget_bytes = 6_000_000_000
+
+[server]
+# Max archives extracted simultaneously (caps CPU/memory/IO).
+extract_concurrency = 2
+
+# [browse]
+# Setting a browse root ENABLES adding/removing libraries from the UI, confined to
+# this directory. Off by default. Only enable behind your own authentication.
+# root = "/libraries"

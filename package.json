@@ -1,0 +1,10 @@
+{
+  "name": "comic-cascade-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Frontend is plain ES modules — no bundler, no build step. This file only marks the .js files as ES modules for Node tooling/tests.",
+  "scripts": {
+    "test": "node --test tests/js/"
+  }
+}
