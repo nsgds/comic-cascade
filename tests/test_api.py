@@ -130,6 +130,60 @@ def test_reorder_libraries(client):
     assert client.delete(f"/api/libraries/{sid}").status_code == 200
 
 
+def test_admin_allowlist_gates_management(client, monkeypatch):
+    """With CASCADE_ADMINS set, only the proxy-identified admin may manage."""
+    import app.main as m
+
+    monkeypatch.setattr(m, "USER_HEADER", "X-Remote-User")
+    monkeypatch.setattr(m, "ADMINS", frozenset({"alice"}))
+
+    # anonymous (no identity header) -> not an admin
+    anon = client.get("/api/libraries").json()
+    assert anon["managed"] is True and anon["can_manage"] is False
+    order = [lib["id"] for lib in anon["libraries"]]
+    assert client.get("/api/fs").status_code == 403
+    assert client.put("/api/libraries/order", json={"order": order}).status_code == 403
+
+    # a user not on the allowlist -> still 403
+    assert client.get("/api/fs", headers={"X-Remote-User": "mallory"}).status_code == 403
+
+    # the admin -> allowed
+    hdr = {"X-Remote-User": "alice"}
+    assert client.get("/api/libraries", headers=hdr).json()["can_manage"] is True
+    assert client.get("/api/fs", headers=hdr).status_code == 200
+    assert (
+        client.put("/api/libraries/order", json={"order": order}, headers=hdr).status_code
+        == 200
+    )
+
+
+def test_admin_group_gates_management(client, monkeypatch):
+    """Management can be granted by group membership from a proxy groups header,
+    with no per-user allowlist to maintain."""
+    import app.main as m
+
+    monkeypatch.setattr(m, "USER_HEADER", "X-Remote-User")
+    monkeypatch.setattr(m, "ADMINS", frozenset())  # no user allowlist
+    monkeypatch.setattr(m, "GROUPS_HEADER", "X-Remote-Groups")
+    monkeypatch.setattr(m, "ADMIN_GROUPS", frozenset({"comic-admins"}))
+
+    order = [lib["id"] for lib in client.get("/api/libraries").json()["libraries"]]
+
+    # a user NOT in the admin group -> denied
+    nonadmin = {"X-Remote-User": "carol", "X-Remote-Groups": "users|viewers"}
+    assert client.get("/api/libraries", headers=nonadmin).json()["can_manage"] is False
+    assert client.get("/api/fs", headers=nonadmin).status_code == 403
+
+    # a user in the admin group -> allowed (note the pipe-separated groups)
+    admin = {"X-Remote-User": "carol", "X-Remote-Groups": "users|comic-admins"}
+    assert client.get("/api/libraries", headers=admin).json()["can_manage"] is True
+    assert client.get("/api/fs", headers=admin).status_code == 200
+    assert (
+        client.put("/api/libraries/order", json={"order": order}, headers=admin).status_code
+        == 200
+    )
+
+
 def test_add_outside_browse_root_rejected(client):
     r = client.post("/api/libraries", json={"name": "x", "path": "../../etc"})
     assert r.status_code == 400

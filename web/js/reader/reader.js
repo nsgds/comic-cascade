@@ -10,6 +10,7 @@
 // the viewport can never be centred).
 
 import { api } from "../api.js";
+import * as progress from "../progress.js";
 import { computeLayout, pageScrollTarget } from "./layout.js";
 import { clampGap, GAP_STEP, loadSettings, saveSettings } from "./settings.js";
 import { getTheme, toggleTheme } from "../theme.js";
@@ -57,6 +58,9 @@ export function renderReader(container, { library, path, query }) {
     gap: query.has("gap") ? clampGap(query.get("gap")) : saved.gap,
     pinned: saved.pinned, // toolbar pinned vs auto-hide (local pref, not in URL)
   };
+  // An explicit page in the URL (refresh mid-read, shared link, continue-reading
+  // chip) is authoritative: open there directly, never offer the resume pill.
+  const hasExplicitPage = query.has("page");
   const wantPage = Math.max(0, parseInt(query.get("page") || "0", 10) || 0);
 
   let dims = [];
@@ -71,6 +75,15 @@ export function renderReader(container, { library, path, query }) {
   let tbMenu = null; // the ⋯ overflow popover
   let menuOpen = false;
   let destroyed = false;
+  let resumePill = null; // the ask-first "Resume from p. N?" offer
+  // Progress writes stay OFF until the resume question is settled (answered,
+  // dismissed, or moot) — otherwise merely opening the comic at page 0 would
+  // clobber the position the pill is offering to restore.
+  let reportingArmed = hasExplicitPage;
+  // True until the first reportProgress() tick. An explicit-page open that lands
+  // clamped on the LAST page (deep link into a since-shrunken comic) must not
+  // count as "finished" — the user hasn't read anything yet.
+  let firstReportTick = true;
 
   const onResize = () => relayout(currentPage);
   const onFullscreenChange = () => {
@@ -80,6 +93,7 @@ export function renderReader(container, { library, path, query }) {
 
   function teardown() {
     destroyed = true;
+    progress.flush(); // a debounced position write must not die with the view
     clearTimeout(navUnlockTimer);
     clearTimeout(toolbarTimer);
     window.removeEventListener("resize", onResize);
@@ -104,7 +118,16 @@ export function renderReader(container, { library, path, query }) {
 
   // ---- load ----
   container.appendChild(el("div", "center-msg", "Loading…"));
-  api.comic(library, path).then(build).catch((e) => {
+  // Look up the saved position in parallel with the comic metadata; the reader
+  // never waits on it (the pill appears when it resolves, usually instantly).
+  // Skipped entirely for explicit-page opens — the answer would go unused.
+  const savedPos = hasExplicitPage
+    ? Promise.resolve(null)
+    : progress.get(library, path).catch(() => null);
+  api.comic(library, path).then((meta) => {
+    build(meta);
+    if (!destroyed && dims.length && !hasExplicitPage) savedPos.then(offerResume);
+  }).catch((e) => {
     if (destroyed) return;
     const code = e.status || "error";
     container.innerHTML = "";
@@ -144,6 +167,8 @@ export function renderReader(container, { library, path, query }) {
       // (relayout/goTo arm the nav lock), so the brief reveal in applyPinState()
       // and on deep-linked load survives. Matches updateCurrentPage's gating.
       if (!st.pinned && now() >= navLockUntil) hideToolbar();
+      // Scrolling answers the resume question ("no thanks, reading from here").
+      if (resumePill && now() >= navLockUntil) dismissResume();
       if (!ticking) {
         ticking = true;
         requestAnimationFrame(() => {
@@ -231,6 +256,56 @@ export function renderReader(container, { library, path, query }) {
     if (!pinBtn) return;
     pinBtn.classList.toggle("on", st.pinned);
     pinBtn.textContent = st.pinned ? "📌  Toolbar pinned" : "📌  Toolbar auto-hides";
+  }
+
+  // ---- read-resume (ask-first) ----
+  function offerResume(rec) {
+    // A record is only worth offering if it points somewhere real to jump to;
+    // anything else (none / page 0 / beyond a shrunken re-scan) just arms writes.
+    if (destroyed || !rec || !(rec.page > 0) || rec.page >= dims.length) {
+      reportingArmed = true;
+      writeUrl(); // no question to ask — the URL may carry the page immediately
+      return;
+    }
+    resumePill = el("div", "resume-pill");
+    resumePill.append(el("span", "resume-pill-text", `Resume from p. ${rec.page + 1} / ${dims.length}?`));
+    const go = el("button", "resume-pill-btn", "Resume");
+    go.onclick = () => {
+      dismissResume();
+      goTo(rec.page, "instant");
+    };
+    const x = Object.assign(el("button", "resume-pill-x", "✕"), { title: "No, stay here" });
+    x.setAttribute("aria-label", "Dismiss, stay on this page");
+    x.onclick = dismissResume;
+    resumePill.append(go, x);
+    rootEl.appendChild(resumePill);
+  }
+
+  function dismissResume() {
+    if (resumePill) {
+      resumePill.remove();
+      resumePill = null;
+    }
+    reportingArmed = true; // question settled either way — start recording
+    writeUrl(); // the URL may now carry the page (it was withheld while pending)
+  }
+
+  function reportProgress() {
+    // The write policy (finish-deletes, page-0 skip, disarmed skip, first-tick
+    // clamp guard) is progress.reportAction — pure and unit-tested.
+    const action = progress.reportAction({
+      armed: reportingArmed,
+      page: currentPage,
+      pageCount: dims.length,
+      firstTickAfterExplicitOpen: firstReportTick && hasExplicitPage,
+    });
+    firstReportTick = false;
+    try {
+      if (action === "finish") progress.forget(library, path, dims.length);
+      else if (action === "record") progress.report(library, path, currentPage, dims.length);
+    } catch {
+      /* progress must never break page navigation */
+    }
   }
 
   // ---- layout / virtualization ----
@@ -406,6 +481,7 @@ export function renderReader(container, { library, path, query }) {
     if (destroyed) return;
     if (pageInd) pageInd.textContent = `${currentPage + 1} / ${dims.length}`;
     writeUrl();
+    reportProgress();
     for (let k = 1; k <= PRELOAD_AHEAD; k++) {
       const j = currentPage + k;
       if (j >= dims.length) continue;
@@ -418,6 +494,7 @@ export function renderReader(container, { library, path, query }) {
 
   // ---- navigation (authoritative: commit the page, then scroll) ----
   function goTo(i, behavior = "smooth") {
+    if (resumePill) dismissResume(); // navigating answers the resume question
     i = Math.max(0, Math.min(dims.length - 1, i));
     currentPage = i;
     onPageChanged();
@@ -617,7 +694,12 @@ export function renderReader(container, { library, path, query }) {
     const q = new URLSearchParams();
     q.set("lib", library);
     q.set("path", path);
-    q.set("page", String(currentPage));
+    // page= means "an explicitly chosen position" (it suppresses the resume pill
+    // and arms writes on load). While the pill is still unanswered we must NOT
+    // self-inject page=0: a reload would then read it back as an explicit answer
+    // and overwrite the saved position with page 0. Until the resume question is
+    // settled, the URL stays page-less, so a reload re-offers the pill.
+    if (reportingArmed) q.set("page", String(currentPage));
     q.set("mode", st.mode);
     q.set("rtl", st.rtl ? "1" : "0");
     q.set("gap", String(st.gap));

@@ -3,8 +3,10 @@
 
 import { api } from "./api.js";
 import { renderLibraryPicker } from "./browser/libraries.js";
+import { renderResumeRow } from "./browser/resume.js";
 import { renderTree } from "./browser/tree.js";
 import { openManageModal } from "./browser/manage.js";
+import { setScope, setServerEnabled } from "./progress.js";
 import { renderReader } from "./reader/reader.js";
 import { applyTheme, getTheme, toggleTheme } from "./theme.js";
 
@@ -52,7 +54,20 @@ function renderBrowse() {
     view.innerHTML = `<div class="center-msg">No libraries configured.</div>`;
     return;
   }
-  renderTree(view, {
+  view.innerHTML = "";
+  const resumeHost = document.createElement("div");
+  const treeHost = document.createElement("div");
+  view.append(resumeHost, treeHost);
+  // The row is cross-library and deep-links with the page: tapping a chip is an
+  // explicit "continue", so the reader jumps straight there (no pill).
+  renderResumeRow(resumeHost, {
+    onOpen: (item) => {
+      location.hash =
+        `/read?lib=${encodeURIComponent(item.library)}` +
+        `&path=${encodeURIComponent(item.path)}&page=${item.page}`;
+    },
+  });
+  renderTree(treeHost, {
     library: state.library,
     showAll: state.showAll,
     onOpenComic: openComic,
@@ -82,6 +97,13 @@ function route() {
 function applyLibrariesData(data) {
   state.libraries = data.libraries;
   state.managed = data.managed;
+  // can_manage folds in the optional admin allowlist; fall back to managed for
+  // older servers that don't report it.
+  state.canManage = data.can_manage ?? data.managed;
+  // Server-side read progress is available iff this session has a proxy identity;
+  // the scope token partitions LOCAL progress per user on shared browsers.
+  setServerEnabled(data.progress ?? false);
+  setScope(data.progress_scope ?? null);
 
   if (!state.libraries.find((l) => l.id === state.library)) {
     state.library = state.libraries[0]?.id || null;
@@ -94,7 +116,7 @@ function applyLibrariesData(data) {
     if (parseHash().name === "read") location.hash = "/";
     else renderBrowse();
   });
-  manageBtn.hidden = !state.managed;
+  manageBtn.hidden = !state.canManage;
 }
 
 // Called by the manage modal after add/remove so the picker + tree stay in sync.

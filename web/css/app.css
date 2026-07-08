@@ -441,3 +441,118 @@ body.reading #topbar { display: none; }
   color: var(--fg-dim);
 }
 .center-msg a { color: var(--accent-text); }
+
+/* ---- continue-reading row (browse) ---- */
+.resume-row {
+  padding: 0.35rem 0 0.55rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.35rem;
+}
+.resume-row-label {
+  padding: 0.15rem 0.9rem 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+.resume-strip {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0 0.9rem;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+.resume-chip {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  max-width: 16rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.resume-chip:hover { background: var(--bg-hover); }
+.resume-chip:hover .resume-chip-name { color: var(--accent-text); }
+.resume-chip-open {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  padding: 0.4rem 0.15rem 0.4rem 0.6rem;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.resume-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.9rem;
+}
+.resume-chip-pos {
+  color: var(--fg-dim);
+  font-size: 0.78rem;
+}
+.resume-chip-x {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0.4rem 0.5rem; /* >=24px target (WCAG 2.5.8) */
+  margin-right: 0.2rem;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.resume-chip-x:hover { background: var(--danger-tint); color: var(--danger); }
+
+/* ---- resume pill (reader, ask-first) ---- */
+.resume-pill {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.5rem 0.45rem 0.85rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  /* Above pages (z auto), below the toolbar in BOTH modes: the auto-hide
+     toolbar is its own stacking context at z 55, so the pill must stay under
+     55 or it would paint over the open ⋯ menu. */
+  z-index: 40;
+  white-space: nowrap;
+}
+.resume-pill-text { font-size: 0.92rem; }
+.resume-pill-btn {
+  background: var(--accent);
+  color: var(--on-accent);
+  border: none;
+  border-radius: 999px;
+  padding: 0.3rem 0.85rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.resume-pill-btn:hover { filter: brightness(1.08); }
+.resume-pill-x {
+  background: transparent;
+  border: none;
+  color: var(--fg-dim);
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 0.4rem 0.55rem; /* >=24px target (WCAG 2.5.8) */
+  border-radius: 999px;
+  cursor: pointer;
+}
+.resume-pill-x:hover { background: var(--bg-hover); color: var(--fg); }

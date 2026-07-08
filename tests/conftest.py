@@ -49,6 +49,11 @@ os.environ["CASCADE_LIBRARY"] = str(LIB_DIR)
 os.environ["CASCADE_CACHE_DIR"] = str(CACHE_DIR)
 os.environ["CASCADE_BROWSE_ROOT"] = str(LIB_DIR)  # enables UI library management
 os.environ.pop("CASCADE_CONFIG", None)
+# Identity headers CONFIGURED (so progress tests can assert them) but never SENT
+# by default — a headerless request stays anonymous, exactly like an unconfigured
+# deployment (and no admin allowlists are set, so management stays open as before).
+os.environ["CASCADE_USER_HEADER"] = "X-Test-User"
+os.environ["CASCADE_UID_HEADER"] = "X-Test-Uid"
 
 
 @pytest.fixture(scope="session")

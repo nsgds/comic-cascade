@@ -32,6 +32,17 @@ What the app *does* defend against — even for an allowed/LAN user, and for an
 - **Container** — the image runs as a non-root user; responses send
   `X-Content-Type-Options: nosniff`.
 
+## Proxy-trusted identity (optional)
+
+`CASCADE_USER_HEADER` + `CASCADE_ADMINS` (and/or `CASCADE_GROUPS_HEADER` +
+`CASCADE_ADMIN_GROUPS`) let you restrict library management to named users or
+groups, using an identity your forward-auth proxy injects. The app performs **no**
+authentication itself — it trusts the header(s). That trust is only valid if
+your proxy **sets the header and strips any client-supplied copy**, and the app is
+reachable **only** through the proxy. Exposed directly, the header is trivially
+spoofable. Unset by default (anonymous/global). It gates *management only* —
+reading is always open — and fails closed (no recognized identity ⇒ not an admin).
+
 ## Known limitations
 
 - **Cache eviction race:** under heavy concurrent extraction pressure, an archive

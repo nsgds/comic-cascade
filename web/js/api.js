@@ -32,6 +32,22 @@ export const api = {
   pageURL: (library, path, index) =>
     `/api/page?library=${q(library)}&path=${q(path)}&index=${index}`,
 
+  // ---- per-user reading progress (server tier; inert without an identity) ----
+  progressGet: (library, path) =>
+    getJSON(`/api/progress?library=${q(library)}&path=${q(path)}`),
+
+  progressSet: (body) =>
+    request("/api/progress", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  // (Forgetting is a page-0 tombstone POST via progressSet — see progress.js.
+  //  The server's DELETE endpoint still exists for true removal, but the app
+  //  never calls it: a deleted row can't shadow other devices' stale copies.)
+  progressRecent: () => getJSON("/api/progress/recent"),
+
   // ---- library management (only when the server has a browse root) ----
   fsList: (path = "") => getJSON(`/api/fs?path=${q(path)}`),
 

@@ -15,6 +15,11 @@ def _config(tmp_path, browse_root):
         max_archive_bytes=4_000_000_000,
         max_pdf_pages=3000,
         browse_root=browse_root,
+        user_header=None,
+        admins=frozenset(),
+        groups_header=None,
+        admin_groups=frozenset(),
+        uid_header=None,
     )
 
 

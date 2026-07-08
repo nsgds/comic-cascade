@@ -49,6 +49,11 @@ class Config:
     max_archive_bytes: int
     max_pdf_pages: int
     browse_root: Path | None  # set => UI library management enabled, bounded here
+    user_header: str | None   # trusted proxy identity header (e.g. X-Remote-User); off by default
+    admins: frozenset[str]     # if non-empty, only these users may manage libraries
+    groups_header: str | None  # trusted proxy groups header (e.g. X-Forwarded-Groups); off by default
+    admin_groups: frozenset[str]  # users in any of these groups may manage libraries
+    uid_header: str | None    # stable proxy uid header (e.g. X-Authentik-Uid); keys read-progress
 
     @property
     def libraries_by_id(self) -> dict[str, Library]:
@@ -149,6 +154,74 @@ def _scalar_settings() -> tuple[Path, int, int, int, int]:
     return Path(cache_dir), budget, max(1, concurrency), max(1, max_archive_bytes), max(1, max_pdf_pages)
 
 
+def _coerce_name_list(raw, key: str) -> list[str]:
+    """Accept a TOML array (preferred) or a comma-separated string for a name list
+    ([server] admins / admin_groups). Reject any other type LOUDLY — a misconfigured
+    allowlist must fail to start, never silently fall back to "empty" (which would
+    *open* management)."""
+    if isinstance(raw, str):
+        return raw.split(",")
+    if isinstance(raw, list):
+        return list(raw)
+    raise ValueError(
+        f'[server] {key} must be a TOML array, e.g. {key} = ["alice", "bob"]'
+    )
+
+
+def _clean_names(values) -> frozenset[str]:
+    return frozenset(str(v).strip() for v in values if str(v).strip())
+
+
+def _auth_settings() -> tuple[str | None, frozenset[str], str | None, frozenset[str], str | None]:
+    """Optional proxy-delegated identity + admin gating. All off by default: no
+    headers => anonymous/global (today's behavior); empty admin lists => anyone who
+    reaches the app may manage libraries (when a browse root is also set).
+
+    Management is allowed for a user named in ``admins`` OR in any of ``admin_groups``
+    (the latter read from a groups header set by your proxy — works with Authentik,
+    Authelia, oauth2-proxy, … without coupling to any of them).
+
+    ``uid_header`` optionally names a STABLE per-user id header (e.g. X-Authentik-Uid)
+    used to key per-user reading progress, so a username rename doesn't orphan it;
+    progress falls back to the username when no uid header is configured/present."""
+    user_header: str | None = None
+    groups_header: str | None = None
+    uid_header: str | None = None
+    admins: list[str] = []
+    admin_groups: list[str] = []
+    config_file = _find_config_file()
+    if config_file is not None:
+        with config_file.open("rb") as fh:
+            data = tomllib.load(fh)
+        server = data.get("server", {})
+        user_header = server.get("user_header", user_header)
+        groups_header = server.get("groups_header", groups_header)
+        uid_header = server.get("uid_header", uid_header)
+        if "admins" in server:
+            admins = _coerce_name_list(server["admins"], "admins")
+        if "admin_groups" in server:
+            admin_groups = _coerce_name_list(server["admin_groups"], "admin_groups")
+
+    user_header = os.environ.get("CASCADE_USER_HEADER", user_header)
+    groups_header = os.environ.get("CASCADE_GROUPS_HEADER", groups_header)
+    uid_header = os.environ.get("CASCADE_UID_HEADER", uid_header)
+    if os.environ.get("CASCADE_ADMINS") is not None:
+        admins = os.environ["CASCADE_ADMINS"].split(",")
+    if os.environ.get("CASCADE_ADMIN_GROUPS") is not None:
+        admin_groups = os.environ["CASCADE_ADMIN_GROUPS"].split(",")
+
+    user_header = user_header.strip() if user_header else None
+    groups_header = groups_header.strip() if groups_header else None
+    uid_header = uid_header.strip() if uid_header else None
+    return (
+        (user_header or None),
+        _clean_names(admins),
+        (groups_header or None),
+        _clean_names(admin_groups),
+        (uid_header or None),
+    )
+
+
 def _browse_root() -> Path | None:
     """Directory the UI library-picker may navigate within. Setting it enables
     UI library management; leaving it unset keeps libraries static (config-only)."""
@@ -166,6 +239,7 @@ def _browse_root() -> Path | None:
 def get_config() -> Config:
     libraries = tuple(_assign_ids(_libraries_from_pairs()))
     cache_dir, budget, concurrency, max_archive_bytes, max_pdf_pages = _scalar_settings()
+    user_header, admins, groups_header, admin_groups, uid_header = _auth_settings()
     return Config(
         libraries=libraries,
         cache_dir=cache_dir,
@@ -174,4 +248,9 @@ def get_config() -> Config:
         max_archive_bytes=max_archive_bytes,
         max_pdf_pages=max_pdf_pages,
         browse_root=_browse_root(),
+        user_header=user_header,
+        admins=admins,
+        groups_header=groups_header,
+        admin_groups=admin_groups,
+        uid_header=uid_header,
     )
