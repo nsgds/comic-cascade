@@ -556,3 +556,27 @@ body.reading #topbar { display: none; }
   cursor: pointer;
 }
 .resume-pill-x:hover { background: var(--bg-hover); color: var(--fg); }
+
+/* ---- zoom overlay (reader/zoom.js) ---- */
+/* z-index 55: ABOVE the mounted pages — they are absolutely positioned inside
+   the scroller, so DOM order alone painted them over the overlay (the zoom
+   moved behind the frozen page, visible only in the gaps) — and BELOW the
+   autohide toolbar's 60. The pinned toolbar occupies its own strip above the
+   scroller box, which the overlay never covers. */
+.zoom-layer {
+  position: fixed;
+  z-index: 55;
+  overflow: hidden;
+  background: var(--reader-bg);
+  touch-action: none;          /* ZOOM owns every gesture on the overlay */
+  overscroll-behavior: contain; /* no pull-to-refresh / back-swipe mid-pan */
+  cursor: grab;
+}
+.zoom-layer:active { cursor: grabbing; }
+.zoom-layer .zoom-img {
+  position: absolute;
+  transform-origin: 0 0;
+  will-change: transform;
+  user-select: none;
+  -webkit-user-drag: none;
+}

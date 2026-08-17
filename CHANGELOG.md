@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.3.0 — 2026-08-17
+
+- **Pinch-zoom in the reader** — the long-standing gap: the Fullscreen API
+  disables the browser's native page zoom. Pinch out on a page (or double-tap;
+  double-click / Ctrl-scroll on desktop; `+` key) to zoom, up to the larger of
+  3× and the image's native resolution; drag, plain scroll or a pinch to
+  pan/adjust; pinch back to fit — or double-tap, Escape or `0` — to click back
+  into normal scrolling exactly where you were. Works in and out of
+  fullscreen, anchors to the page under your fingers (not just the "current"
+  page), and pans with a tapered slack margin so a panel at the page's rim can
+  be pulled toward the middle of the screen. Layout still never upscales;
+  explicit zoom may.
+- Architecturally the zoom is an overlay BESIDE the virtualized reader (the
+  scroll state is frozen and restored by construction, never transformed), with
+  input unified across touch pointers, trackpad ctrl-wheel and double-tap. The
+  touch strategy is device-verified against Android Chrome's gesture stealing
+  (per-gesture `preventDefault` plus a reading-view viewport lock; the
+  browser's accessibility "force enable zoom" override is tolerated
+  gracefully). Details in OVERVIEW.md §8.
+- **OVERVIEW.md** — a reviewer-facing architecture map of the whole project,
+  kept in sync with code by contract stated in its header.
+- The machine-specific compose override is now gitignored, keeping the
+  published repo host-agnostic.
+- Pillow bumped to 12.3.0 — image-decoding CVE fixes (flagged by pip-audit /
+  Dependabot; Pillow decodes untrusted comic pages here, so these are squarely
+  in this app's threat model).
+- Tests: 65 pytest + 56 node — new suites for the zoom transform math
+  (mutation-hardened focal-invariant tests), the gesture pointer reducer, and
+  the DOM gesture adapter driven through a real EventTarget.
+
 ## 0.2.0 — 2026-07-08
 
 - **Multi-user management authorization** (optional, off by default): trust a

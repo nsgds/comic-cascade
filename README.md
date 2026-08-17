@@ -22,6 +22,10 @@ only thing it ever records is your own reading position.
   - Pages are **never upscaled** beyond their native resolution; the first page
     sits flush against the reading edge; the counter follows the page crossing
     the centre line.
+  - **Pinch-zoom** — pinch out on a page (or double-tap; double-click /
+    Ctrl-scroll on desktop) to zoom in, drag to pan, pinch back to fit — or
+    double-tap, Escape or `0` — to click back into scrolling. Works in and
+    out of fullscreen and anchors to the page under your fingers.
   - Page-jump buttons and full keyboard navigation, adjustable page gap,
     fullscreen, an auto-hiding/pinnable toolbar, and a light/dark theme.
   - **Deep-linkable** — the URL carries your mode/direction/gap/page, so a
@@ -99,11 +103,9 @@ reference: **[CONFIG.md](CONFIG.md)**. The short version:
 | Reading mode / direction | **Menu → Reading mode** (Vertical / L→R / R→L) |
 | Next / previous page | the `‹ ›` buttons; arrow keys (←/→ in horizontal, ↑/↓ in vertical); Space / PageDown / PageUp (vertical); Home / End jump to first / last |
 | Resume where you left off | the "Continue reading" row, or the "Resume from p. N?" pill on reopening |
+| Zoom into a page | pinch or double-tap (touch); double-click or Ctrl-scroll (desktop); `+` / `-` / `0` keys; drag, scroll or pinch to pan/adjust |
 | Page gap, pin toolbar, fullscreen, theme | the **Menu** (and the `f` key for fullscreen) |
 | Light / dark | the ☀/🌙 button (library) or **Menu → … mode** (reader) |
-
-Zooming currently uses your browser's native pinch-zoom (works outside
-fullscreen).
 
 ## Security
 

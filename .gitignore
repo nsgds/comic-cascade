@@ -10,3 +10,6 @@ libraries/
 cascade.toml
 *.sqlite3
 .DS_Store
+
+# Machine-specific deployment (captured in ~/infra/host/deploy/)
+docker-compose.override.yml

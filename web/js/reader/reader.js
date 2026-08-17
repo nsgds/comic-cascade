@@ -1,7 +1,8 @@
 // The reader: two scroll modes (vertical fit-width / horizontal fit-height with
 // RTL), virtualized so only pages near the viewport are in the DOM, with page-jump
 // navigation, adjustable gap, keyboard control, and URL state for refresh-resume.
-// Pinch-zoom is layered on in a later phase; this owns native scroll only.
+// Pinch-zoom is layered on BESIDE this via reader/zoom.js (the SCROLL<->ZOOM
+// overlay); this file owns native scroll and hands zoom the integration hooks.
 //
 // Navigation is authoritative: goTo()/relayout() set the current page directly and
 // briefly lock scroll-driven detection (navLock) so the programmatic scroll's own
@@ -13,6 +14,7 @@ import { api } from "../api.js";
 import * as progress from "../progress.js";
 import { computeLayout, pageScrollTarget } from "./layout.js";
 import { clampGap, GAP_STEP, loadSettings, saveSettings } from "./settings.js";
+import { createZoomController } from "./zoom.js";
 import { getTheme, toggleTheme } from "../theme.js";
 
 const OVERSCAN = 1.25; // viewport multiples kept mounted beyond the visible window
@@ -72,6 +74,7 @@ export function renderReader(container, { library, path, query }) {
   const mounted = new Map(); // index -> img
   const preloads = new Set(); // detached prefetch <img>s, tracked so teardown aborts them
   let scroller, spacer, toolbar, pageInd, rootEl, fsBtn, pinBtn;
+  let zoom = null; // SCROLL<->ZOOM controller (zoom.js); null until build()
   let tbMenu = null; // the ⋯ overflow popover
   let menuOpen = false;
   let destroyed = false;
@@ -85,6 +88,18 @@ export function renderReader(container, { library, path, query }) {
   // count as "finished" — the user hasn't read anything yet.
   let firstReportTick = true;
 
+  // Reading-view viewport lock. Once a scroll/fling is active, Chrome delivers
+  // NON-cancelable touchmoves — the gesture layer's 2-finger preventDefault
+  // hatch cannot fire (it rightly checks e.cancelable) and a mid-fling pinch
+  // falls through to the BROWSER's viewport zoom, zooming the whole app,
+  // toolbar included. Disabling viewport zoom for the reading view only closes
+  // that window: Android honors it; iOS ignores the attribute (keeping its
+  // accessibility zoom — Safari's own gesture is handled by the gesture* shim).
+  // The browse view keeps normal page zoom — this is swapped in build() and
+  // restored in teardown().
+  const vpMeta = document.querySelector('meta[name="viewport"]');
+  const vpOriginal = vpMeta ? vpMeta.content : null;
+
   const onResize = () => relayout(currentPage);
   const onFullscreenChange = () => {
     syncFsButton();
@@ -94,6 +109,8 @@ export function renderReader(container, { library, path, query }) {
   function teardown() {
     destroyed = true;
     progress.flush(); // a debounced position write must not die with the view
+    if (zoom) zoom.destroy();
+    if (vpMeta && vpOriginal !== null) vpMeta.content = vpOriginal;
     clearTimeout(navUnlockTimer);
     clearTimeout(toolbarTimer);
     window.removeEventListener("resize", onResize);
@@ -143,6 +160,11 @@ export function renderReader(container, { library, path, query }) {
 
   function build(meta) {
     if (destroyed) return;
+    if (vpMeta) {
+      // APPEND to the original content (it carries viewport-fit=cover, which
+      // the toolbar's safe-area cutout padding depends on) — never replace it.
+      vpMeta.content = `${vpOriginal}, maximum-scale=1, user-scalable=no`;
+    }
     dims = meta.dims && meta.dims.length ? meta.dims : [];
     if (dims.length === 0) {
       container.innerHTML = "";
@@ -179,10 +201,46 @@ export function renderReader(container, { library, path, query }) {
     };
     scroller.addEventListener("scroll", onScroll, { passive: true });
     document.addEventListener("keydown", onKey); // document-level so toolbar clicks don't lose nav
-    // Single-pointer tap toggles the toolbar when auto-hiding (kept single-pointer
-    // so it won't conflict with multi-touch pinch in a later phase).
+    // Single-pointer tap toggles the toolbar when auto-hiding (kept
+    // single-pointer so it doesn't conflict with the multi-touch pinch that
+    // enters zoom).
     scroller.addEventListener("pointerdown", onPointerDown);
     scroller.addEventListener("pointerup", onPointerUp);
+    // Pinch/double-tap/ctrl-wheel enter the zoom overlay; entering dismisses
+    // the resume pill (like scrolling does) and lets the toolbar slip away.
+    zoom = createZoomController({
+      rootEl, scroller, toolbar,
+      // The page UNDER the gesture point — at a page seam the viewport-center
+      // page (currentPage) is routinely the tapped page's neighbour. Falls back
+      // to currentPage when the point misses every mounted rect (page gaps,
+      // keyboard-center entry). Zooming a non-current page deliberately does
+      // NOT re-commit currentPage: progress/URL keep viewport-center semantics.
+      getPage: (cx, cy) => {
+        let idx = currentPage;
+        if (cx != null) {
+          for (const [i, im] of mounted) {
+            const r = im.getBoundingClientRect();
+            if (cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom) {
+              idx = i;
+              break;
+            }
+          }
+        }
+        return {
+          img: mounted.get(idx),
+          natural: dims[idx] || null,
+          src: api.pageURL(library, path, idx),
+        };
+      },
+      // Finish an in-flight smooth scroll before the overlay measures rects.
+      settle: () => {
+        if (now() < navLockUntil) scrollToPage(currentPage, "instant");
+      },
+      onEnter: () => {
+        if (resumePill) dismissResume();
+        if (!st.pinned) hideToolbar();
+      },
+    });
     window.addEventListener("resize", onResize);
     if (FULLSCREEN_SUPPORTED) {
       document.addEventListener("fullscreenchange", onFullscreenChange);
@@ -262,7 +320,11 @@ export function renderReader(container, { library, path, query }) {
   function offerResume(rec) {
     // A record is only worth offering if it points somewhere real to jump to;
     // anything else (none / page 0 / beyond a shrunken re-scan) just arms writes.
-    if (destroyed || !rec || !(rec.page > 0) || rec.page >= dims.length) {
+    // A record resolving AFTER the user already entered ZOOM is moot the same
+    // way scrolling is ("reading from here") — and the pill would render at
+    // z 40 under the z 55 overlay, invisible but interactive.
+    if (destroyed || !rec || !(rec.page > 0) || rec.page >= dims.length ||
+        (zoom && zoom.active())) {
       reportingArmed = true;
       writeUrl(); // no question to ask — the URL may carry the page immediately
       return;
@@ -311,6 +373,9 @@ export function renderReader(container, { library, path, query }) {
   // ---- layout / virtualization ----
   function relayout(preservePage) {
     if (destroyed) return;
+    // Geometry is about to change under the overlay's captured rects: leave
+    // ZOOM first (v1 policy — resize/rotation/mode/pin changes all land here).
+    if (zoom && zoom.active()) zoom.exit(false);
     const vw = scroller.clientWidth;
     const vh = scroller.clientHeight;
     if (vw === 0 || vh === 0) {
@@ -494,6 +559,7 @@ export function renderReader(container, { library, path, query }) {
 
   // ---- navigation (authoritative: commit the page, then scroll) ----
   function goTo(i, behavior = "smooth") {
+    if (zoom && zoom.active()) zoom.exit(); // navigate = leave ZOOM (arrows too)
     if (resumePill) dismissResume(); // navigating answers the resume question
     i = Math.max(0, Math.min(dims.length - 1, i));
     currentPage = i;
@@ -514,6 +580,13 @@ export function renderReader(container, { library, path, query }) {
         (t.closest && t.closest("button, a, select, [role=button]")))
     ) {
       return; // don't hijack typing, or a focused control's own Space/Enter
+    }
+    // Zoom keys first: Escape/0 exit, +/-/= zoom (and "+" enters from SCROLL).
+    // Navigation keys are NOT consumed there — goTo() exits zoom itself, so
+    // arrows/Home/End "exit then navigate" without special casing.
+    if (zoom && zoom.handleKey(e.key)) {
+      e.preventDefault();
+      return;
     }
     const horiz = st.mode === "horizontal";
     let handled = true;
