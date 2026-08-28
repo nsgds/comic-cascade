@@ -10,7 +10,7 @@ described here, update this file **in the same commit**.
 
 ## 1. What this is
 
-**Status: v0.3.0.** A minimal, self-hostable comic reader (0BSD): browse
+**Status: v0.4.0.** A minimal, self-hostable comic reader (0BSD): browse
 folders of CBZ/CBR/PDF files, read them in the browser, resume where you left
 off. The guiding constraint throughout is **a fast reader, not a platform** —
 no accounts, no metadata scraping, no collections, no server-side rendering of
@@ -47,12 +47,13 @@ Frontend (no build step, vanilla ES modules, `web/js/`):
 |---|---|
 | `main.js` | bootstrap + hash router (browse view ↔ reader view) |
 | `api.js` | fetch wrappers |
-| `browser/` | library picker, file tree, "continue reading" row, manage modal |
+| `browser/` | library picker, file tree (incl. the `#/?sel=` deep-link reveal), "continue reading" row, manage modal |
 | `reader/reader.js` | the virtualized reader (§8) |
 | `reader/layout.js` | pure layout math (node-testable) |
 | `reader/zoom-math.js` | pure zoom/pan transform math (node-tested): focal-preserving zoom, pan clamps, scale caps |
 | `reader/gestures.js` | unified pinch/pan/double-tap input stream (pure node-tested pointer reducer + DOM adapter); carries the device-verified 2-finger `preventDefault` hatch — `touch-action` alone does NOT stop Android Chrome from cancelling and keeping a pinch |
 | `reader/zoom.js` | the SCROLL↔ZOOM state machine + zoom overlay (§8) |
+| `reader/siblings.js` | pure next-comic-in-folder lookup (node-tested) behind the end-of-comic "Up next" card (the layout tail, §8) |
 | `reader/settings.js` | per-device reader prefs in `localStorage` |
 | `progress.js` | both read-resume tiers + the merge (§7); pure helpers are node-testable |
 | `theme.js` | light/dark theme |
@@ -147,6 +148,16 @@ Two tiers, one interface, merged **freshest-`updated_at`-wins**:
 
 Semantics a reviewer should not "fix":
 
+- **Finishing does not forget.** The last page records n/n like any other
+  page, so the "continue reading" chip stays (✓-marked) — your place in a
+  series is "at the end of this issue", where the end card offers the next
+  one. The chip moves on by HANDOFF instead: tapping Read on the end card
+  stashes this comic (sessionStorage), and the next comic's first recorded
+  position tombstones it. Until that first record — e.g. backing straight out
+  of the next issue at page 0 — the previous chip survives, so the series
+  place is never lost. Reverting finish to a delete/tombstone reintroduces
+  exactly that loss. (A lingering ✓ chip for a series the user abandons is
+  the accepted cost; ✕ removes it.)
 - **Forgetting is a page-0 tombstone POST, not a DELETE.** A deleted row is
   invisible to the freshest-wins merge, so another device's stale local copy
   would resurrect the chip; a tombstone competes in the merge and shadows it
@@ -209,6 +220,41 @@ the geometry is `reader/zoom-math.js`; a pinch that starts on the scroller
 streams through the SCROLL→ZOOM transition seamlessly (touch pointers are
 implicitly captured by the element that saw pointerdown).
 
+After the last page comes the **end card** — a fixed-size cell IN the scroll
+flow (the layout TAIL: `computeLayout` reserves it one gap past the last page
+in reading order, which mirroring places at the far left in RTL). Scrolling
+past the final page reveals "Up next: … [Read]" — or, on the folder's last
+comic, an end-of-folder note with a Browse button — plus a subtle
+back-to-folder link. Because it is beside the pages rather than over them, it
+never occludes art and needs no dismissal or visibility state; pressing
+next-page on the last page smooth-scrolls it into view. The cell is not a
+page: `dims`/`starts` don't know it, so page detection, progress and zoom are
+untouched — and the WHOLE tail region counts as "the last page is current":
+the edge guard keys on `pagesEnd` (the pre-tail end computeLayout exposes),
+not on max scroll, because the last page's forward-pinned rest position sits
+a gap+tail short of max scroll and centre-line detection there would flip the
+committed page back to its neighbour (re-recording over a fresh n/n finish)
+on the first pixel of a drag toward the card. The next-comic lookup (`reader/siblings.js`, pure) walks the
+folder's own `/api/tree` listing — fetched once in parallel with the comic,
+nothing waits on it — **in server order** (the canonical natural sort) and
+**within the folder only**; crossing into sibling folders has no well-defined
+order. "Read" navigates without a `page=` param, so the next comic opens with
+fresh-open semantics (its own resume pill can fire). If the file is missing
+from the listing (renamed/hidden) or the listing failed, the card claims
+nothing — silence over a wrong "last in folder" claim. Progress flows through
+the card as a handoff: finishing records n/n (the chip stays — it IS your
+series place), and Read stashes a handoff that tombstones this comic once the
+next one records its own position (§7).
+
+Leaving the reader keeps your place in the library: the toolbar's Back button
+(and the error screen's) links to `#/?lib=…&sel=…` rather than a bare `#/`.
+The browse view adopts the named library, and the tree walks the `sel` path as
+each lazy level loads (one `/api/tree` per level — the same calls clicking
+would make, never a recursive walk), opening matched directories and
+highlighting + centering the final row. The per-node walk rule is a pure,
+node-tested function (`revealAction`); a stale or hidden target simply stops
+matching and degrades to the plain collapsed tree — never an error.
+
 Page responses are immutable-cacheable (`max-age=31536000, immutable` + an
 `ETag` keyed on the cache hash, which already changes when the source file
 does). Everything non-`/api/` is `no-cache` (revalidate, not no-store) so a
@@ -252,9 +298,10 @@ runs in CI; there is no mocked-subprocess layer to drift.
 
 JS (`node --test tests/js/`): the pure layout math, the progress
 merge/partitioning helpers, the zoom transform math (focal-point invariant,
-pan clamps, scale caps), and the gesture pointer reducer (pinch lifecycle,
-pointercancel-means-the-browser-took-it, ghost-pairing) — the modules are
-written so their logic imports into Node without a DOM.
+pan clamps, scale caps), the gesture pointer reducer (pinch lifecycle,
+pointercancel-means-the-browser-took-it, ghost-pairing), the tree's deep-link
+reveal rule, and the next-comic sibling lookup — the modules are written so
+their logic imports into Node without a DOM.
 
 CI (GitHub Actions): pytest, `pip-audit` over runtime deps, `node --check`
 over every ES module, the JS tests, and a Docker image build.
@@ -293,6 +340,10 @@ over every ES module, the JS tests, and a Docker image build.
   archive-internal names reopens Zip-Slip.
 - **Content sniff over extension** in the pipeline: honoring the extension
   breaks real-world mislabeled `.cbz` files.
+- **"Up next" is within-folder, in server listing order.** Don't re-sort the
+  siblings client-side (a lexicographic sort breaks natural ordering the
+  server already did) and don't "improve" it by recursing into sibling
+  folders — that ordering is undefined and the tree API never recurses.
 - **Compose override files append sequences.** If you deploy with a
   `docker-compose.override.yml` and replace a sequence (e.g. `ports`), mark it
   `!override` — otherwise Compose *merges* and the base's binding survives

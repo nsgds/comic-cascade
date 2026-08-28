@@ -9,10 +9,15 @@
 // Pages are never upscaled: the fit dimension is min(viewport, natural). A leading
 // pad before page 0 lets the FIRST page sit flush against the forward (reading)
 // edge — bottom in vertical, right in LTR, left in RTL — with empty space behind it.
+//
+// An optional TAIL reserves one extra non-page cell after the last page in
+// reading order (the end-of-comic card): it extends `total` and lands at
+// `tailStart` — past the last page in vertical/LTR, at the far LEFT in RTL
+// (mirroring puts "after the last page" there). Pages know nothing about it.
 
 const FALLBACK = { w: 800, h: 1200 }; // used for pages with unknown/missing dims
 
-export function computeLayout(dims, mode, rtl, gap, viewportW, viewportH) {
+export function computeLayout(dims, mode, rtl, gap, viewportW, viewportH, tail = 0) {
   const n = dims.length;
   const extents = new Array(n);
   const cross = new Array(n);
@@ -46,7 +51,10 @@ export function computeLayout(dims, mode, rtl, gap, viewportW, viewportH) {
     offsets[i] = acc;
     acc += extents[i] + gap;
   }
-  const total = n ? acc - gap : 0;
+  const pagesEnd = n ? acc - gap : 0;
+  // The tail cell sits one gap after the last page in reading order.
+  const hasTail = n > 0 && tail > 0;
+  const total = hasTail ? pagesEnd + gap + tail : pagesEnd;
 
   // Visual start coordinate. Horizontal RTL mirrors so reading right-to-left
   // (the lead pad then lands on the right, pinning page 0 to the left edge).
@@ -55,8 +63,15 @@ export function computeLayout(dims, mode, rtl, gap, viewportW, viewportH) {
   for (let i = 0; i < n; i++) {
     starts[i] = mirror ? total - offsets[i] - extents[i] : offsets[i];
   }
+  // Mirroring lands the tail exactly at 0 (total − (pagesEnd+gap) − tail).
+  const tailStart = hasTail ? (mirror ? 0 : pagesEnd + gap) : null;
 
-  return { extents, cross, starts, total, lead };
+  // pagesEnd (reading-order end of the last page, before the tail) is exposed
+  // so page detection can treat the whole tail region as "the last page is
+  // current": the last page's forward-pinned REST position is pagesEnd −
+  // viewport, which equaled maxScroll before the tail extended the range —
+  // an edge guard keyed on maxScroll alone no longer covers it.
+  return { extents, cross, starts, total, lead, tailStart, pagesEnd };
 }
 
 // Scroll position that places page i correctly for the forward-edge model:

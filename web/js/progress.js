@@ -6,10 +6,11 @@
 // are), writes are mirrored to the server so your position follows you across
 // devices. Reads merge both, freshest updated_at wins.
 //
-// Records are keyed (library, path); page is the 0-based page index. Forgetting a
-// comic (finished it / dismissed its chip) writes a page-0 TOMBSTONE rather than
-// deleting: a deleted row is invisible to the freshest-wins merge, so another
-// device's stale local copy would resurrect the chip — a tombstone instead
+// Records are keyed (library, path); page is the 0-based page index. Forgetting
+// a comic (dismissed its chip / handed off to the next issue) writes a page-0
+// TOMBSTONE rather than deleting: a deleted row is invisible to the
+// freshest-wins merge, so another device's stale local copy would resurrect
+// the chip — a tombstone instead
 // competes in the merge (shadowing stale copies everywhere) and page-0 records
 // are already hidden from every surface. Tombstones are plain POSTs: idempotent,
 // sendBeacon-able on unload, and ordered by the same mutation chain as position
@@ -79,16 +80,21 @@ export function mergeRecent(localEntries, serverItems, max = RECENT_MAX) {
 // What one reader page-tick should do to the record. Pure, so the reader's core
 // write policy is testable:
 //  - not armed (the resume pill is still unanswered) -> never write;
-//  - last page -> "finish" (delete the record) — EXCEPT on the very first tick
-//    of an explicit-page open: a deep link clamped past a shrunken re-scan lands
-//    on the last page without the user reading anything, and must not delete;
 //  - page 0 -> nothing to resume, write nothing (merely glancing at a comic can
-//    never create a junk record or clobber a saved position);
+//    never create a junk record or clobber a saved position — and page 0 is
+//    also the tombstone encoding). A single-page comic therefore never records;
+//  - last page -> "record" like any other page: finishing KEEPS the chip at
+//    n/n — your place in a series is "at the end of this issue", where the end
+//    card offers the next one. The record is forgotten only when the comic you
+//    advance to writes its own first position (the handoff in reader.js) or the
+//    chip is ✕'d. EXCEPT on the very first tick of an explicit-page open: a
+//    deep link clamped past a shrunken re-scan lands on the last page without
+//    the user reading anything, and must not overwrite the saved position;
 //  - otherwise -> "record".
 export function reportAction({ armed, page, pageCount, firstTickAfterExplicitOpen }) {
-  if (!armed) return "skip";
-  if (page >= pageCount - 1) return firstTickAfterExplicitOpen ? "skip" : "finish";
-  return page > 0 ? "record" : "skip";
+  if (!armed || page <= 0) return "skip";
+  if (page >= pageCount - 1 && firstTickAfterExplicitOpen) return "skip";
+  return "record";
 }
 
 // ---- localStorage tier ------------------------------------------------------
@@ -177,7 +183,8 @@ export function report(library, path, page, total) {
   }, DEBOUNCE_MS);
 }
 
-/** Forget a comic (finished it, or dismissed its chip): write a page-0
+/** Forget a comic (dismissed its chip, or its series place moved on to the
+ * next issue): write a page-0
  * tombstone to both tiers so the forget PROPAGATES — other devices' stale
  * local copies are shadowed by it in the merge instead of resurrecting. */
 export function forget(library, path, total = 1) {

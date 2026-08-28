@@ -79,6 +79,46 @@ test("empty comic yields zero total", () => {
   assert.deepEqual(L.starts, []);
 });
 
+// ---- tail (the end-of-comic card cell) ----
+
+test("tail extends total one gap past the last page (vertical/LTR); pages untouched", () => {
+  const base = computeLayout(dims, "vertical", false, 10, 500, 800);
+  const L = computeLayout(dims, "vertical", false, 10, 500, 800, 300);
+  assert.deepEqual(L.starts, base.starts); // page geometry identical
+  assert.equal(L.tailStart, base.total + 10); // one gap after the last page
+  assert.equal(L.total, base.total + 10 + 300);
+  assert.equal(base.tailStart, null); // no tail requested -> no cell
+});
+
+test("pagesEnd is the pre-tail end, so the reading-end detection guard holds", () => {
+  // The last page's forward-pinned rest position is pagesEnd - viewport. With
+  // a tail that is BELOW maxScroll (= total - viewport), so detection keyed on
+  // maxScroll alone would hand the rest position to centre-line detection —
+  // the guard must key on pagesEnd instead. Without a tail the two coincide.
+  const base = computeLayout(dims, "vertical", false, 10, 500, 800);
+  const L = computeLayout(dims, "vertical", false, 10, 500, 800, 300);
+  assert.equal(L.pagesEnd, base.total); // pre-tail end unchanged by the tail
+  assert.equal(base.pagesEnd, base.total); // no tail: guard reduces to maxScroll
+  assert.ok(L.pagesEnd - 800 < L.total - 800); // rest position < maxScroll
+  // RTL: the reading end is the far-left region [0, total - pagesEnd]
+  const R = computeLayout(dims, "horizontal", true, 0, 1200, 1000, 400);
+  assert.equal(R.total - R.pagesEnd, 400); // gap 0: exactly the tail span
+});
+
+test("RTL: the tail lands at the far LEFT (after the last page in reading order)", () => {
+  const L = computeLayout(dims, "horizontal", true, 0, 1200, 1000, 400);
+  assert.equal(L.tailStart, 0);
+  assert.equal(L.total, 5200 + 400); // gap 0 here
+  // pages shift right by the tail so the cell fits before them
+  assert.deepEqual(L.starts, [4400, 400]);
+});
+
+test("no tail cell for an empty comic", () => {
+  const L = computeLayout([], "vertical", false, 8, 800, 600, 300);
+  assert.equal(L.tailStart, null);
+  assert.equal(L.total, 0);
+});
+
 // ---- pageScrollTarget: where a jump lands a page ----
 
 test("tall page (fills viewport) aligns to reading-start edge, not the bottom", () => {

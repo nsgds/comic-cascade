@@ -114,7 +114,10 @@ header(s) too. Libraries remain **global**; this only controls *who may edit the
 Your position in each comic is always remembered **per device** in the browser's
 `localStorage` — nothing to configure, works with zero identity. Reopening a
 comic offers "Resume from p. N?", and the browse view shows a "Continue reading"
-row. Finishing a comic forgets it (it reopens from the start).
+row. Finishing a comic keeps its place at the end (its chip shows a ✓ at
+n/n) — in a series that *is* your place, one step from the end-of-comic card
+offering the next issue. The spot moves on automatically once the next issue
+records a position of its own; dismissing the chip (✕) forgets it.
 
 If your proxy supplies an identity (`CASCADE_USER_HEADER`, above), progress is
 **also stored server-side per user** (`<cache>/progress.db`), so your position

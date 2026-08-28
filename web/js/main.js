@@ -11,7 +11,19 @@ import { renderReader } from "./reader/reader.js";
 import { applyTheme, getTheme, toggleTheme } from "./theme.js";
 
 const view = document.getElementById("view");
+const topbarEl = document.getElementById("topbar");
 const selectEl = document.getElementById("library-select");
+
+// The continue-reading row sticks directly below the top bar, whose height
+// varies (wraps to two rows on narrow screens, changes when the picker
+// appears) — publish the rendered height for the CSS `top` to consume.
+// getBoundingClientRect, not offsetHeight: the bar's real height can be
+// fractional (the picker row's rem padding) and the integer-rounded value
+// would pin the row a sub-pixel below the bar's true bottom edge.
+new ResizeObserver(() => {
+  const h = topbarEl.getBoundingClientRect().height;
+  document.documentElement.style.setProperty("--topbar-h", `${h}px`);
+}).observe(topbarEl);
 const showAllEl = document.getElementById("show-all");
 const manageBtn = document.getElementById("manage-btn");
 const themeBtn = document.getElementById("theme-btn");
@@ -49,13 +61,16 @@ function openComic(path) {
     `/read?lib=${encodeURIComponent(state.library)}&path=${encodeURIComponent(path)}`;
 }
 
-function renderBrowse() {
+// params (optional): a browse deep link's query — ?sel= expands the tree to
+// that path and highlights it (the reader's Back button links here).
+function renderBrowse(params) {
   if (!state.library) {
     view.innerHTML = `<div class="center-msg">No libraries configured.</div>`;
     return;
   }
   view.innerHTML = "";
   const resumeHost = document.createElement("div");
+  resumeHost.className = "resume-host"; // sticky below the top bar (app.css)
   const treeHost = document.createElement("div");
   view.append(resumeHost, treeHost);
   // The row is cross-library and deep-links with the page: tapping a chip is an
@@ -71,7 +86,7 @@ function renderBrowse() {
     library: state.library,
     showAll: state.showAll,
     onOpenComic: openComic,
-  });
+  }, params ? params.get("sel") : null);
 }
 
 let readerTeardown = null;
@@ -90,7 +105,16 @@ function route() {
       query: params,
     });
   } else {
-    renderBrowse();
+    // A browse deep link may name a library other than the active one (the
+    // Back button of a comic opened from a continue-reading chip, say) —
+    // adopt it so the tree being revealed is the one the path lives in.
+    const lib = params.get("lib");
+    if (lib && lib !== state.library && state.libraries.some((l) => l.id === lib)) {
+      state.library = lib;
+      localStorage.setItem("cc.library", lib);
+      selectEl.value = lib;
+    }
+    renderBrowse(params);
   }
 }
 
@@ -113,7 +137,10 @@ function applyLibrariesData(data) {
   renderLibraryPicker(selectEl, state.libraries, state.library, (id) => {
     state.library = id;
     localStorage.setItem("cc.library", id);
-    if (parseHash().name === "read") location.hash = "/";
+    // Reset any deep-linked hash (#/read…, or #/?lib&sel from a Back link):
+    // its params describe the OLD library and a refresh would flip back to it.
+    // The hash change re-renders via route(); a bare hash renders directly.
+    if (location.hash && location.hash !== "#/") location.hash = "/";
     else renderBrowse();
   });
   manageBtn.hidden = !state.canManage;

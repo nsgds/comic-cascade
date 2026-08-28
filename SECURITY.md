@@ -26,7 +26,8 @@ What the app *does* defend against — even for an allowed/LAN user, and for an
   uncompressed) and PDFs by `max_pdf_pages`; oversized comics are rejected `422`.
 - **Command injection** — `unar` is run with an argument list (never a shell) and a
   `--` end-of-options separator; a single output file is size-limited via `RLIMIT_FSIZE`.
-- **SQL injection** — all cache-index queries are parameterized.
+- **SQL injection** — all queries against the cache index and the per-user
+  progress store are parameterized.
 - **Info disclosure** — `/api/healthz` reports readiness only (no host paths) and
   extraction errors are logged server-side, not returned to clients.
 - **Container** — the image runs as a non-root user; responses send
@@ -43,6 +44,12 @@ reachable **only** through the proxy. Exposed directly, the header is trivially
 spoofable. Unset by default (anonymous/global). It gates *management only* —
 reading is always open — and fails closed (no recognized identity ⇒ not an admin).
 
+The same trusted headers (plus the optional `CASCADE_UID_HEADER`) also key
+**per-user reading progress** (`/api/progress*`), so the spoofing caveat covers
+progress privacy too: reachable without the proxy, a forged header can read or
+overwrite another user's reading positions. The progress user is always derived
+server-side from these headers, never accepted as a request parameter.
+
 ## Known limitations
 
 - **Cache eviction race:** under heavy concurrent extraction pressure, an archive
@@ -53,8 +60,11 @@ reading is always open — and fails closed (no recognized identity ⇒ not an a
   briefly consume disk before being rolled back.
 - **Directory picker exposure:** when `CASCADE_BROWSE_ROOT` is set (UI library
   management), the picker exposes that root's directory structure to anyone who can
-  reach the app. Keep it unset for unauthenticated installs.
+  reach the app — unless management is restricted via `CASCADE_ADMINS` /
+  `CASCADE_ADMIN_GROUPS` (see Proxy-trusted identity above), which also gates the
+  picker (403). Keep it unset — or set an admin allowlist — for unauthenticated
+  installs.
 
 ## Supported versions
 
-Security fixes target the latest `0.1.x` release.
+Security fixes target the latest release.

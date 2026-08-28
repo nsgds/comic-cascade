@@ -30,12 +30,15 @@ only thing it ever records is your own reading position.
     fullscreen, an auto-hiding/pinnable toolbar, and a light/dark theme.
   - **Deep-linkable** — the URL carries your mode/direction/gap/page, so a
     refresh (or a shared link) lands exactly where you were.
+- **"Up next"** — finishing a comic offers the next one in its folder; one
+  tap keeps you reading through a series.
 - **Read-resume** — reopening a comic offers "Resume from p. N?", and a
   "Continue reading" row above the tree jumps you back in with one tap. Works
   per-device out of the box (localStorage); with a reverse proxy that forwards
   identity, positions follow you **across devices** (see
   [CONFIG.md](CONFIG.md#reading-progress-read-resume)). Finishing a comic
-  forgets it.
+  keeps its chip (✓-marked) as your place in the series; it moves on when you
+  continue to the next issue, or when you ✕ it.
 - **File-explorer browsing** — your real folder and file names, as a lazy tree
   (no pre-scan of huge libraries, no metadata scraping, no renaming).
 - **Formats:** CBR (RAR), CBZ (Zip *and* 7-Zip-disguised), and PDF.
@@ -99,11 +102,14 @@ reference: **[CONFIG.md](CONFIG.md)**. The short version:
 | Action | Control |
 |---|---|
 | Browse | click folders to expand; click a comic to open |
+| Back to your place | the reader's `❮` button returns to the comic's folder with its row highlighted |
 | Show/hide non-comic files | the "show all files" toggle (top bar) |
 | Reading mode / direction | **Menu → Reading mode** (Vertical / L→R / R→L) |
 | Next / previous page | the `‹ ›` buttons; arrow keys (←/→ in horizontal, ↑/↓ in vertical); Space / PageDown / PageUp (vertical); Home / End jump to first / last |
 | Resume where you left off | the "Continue reading" row, or the "Resume from p. N?" pill on reopening |
+| Continue to the next comic | scroll (or press next) past the last page — the "Up next" card (same folder, in order) |
 | Zoom into a page | pinch or double-tap (touch); double-click or Ctrl-scroll (desktop); `+` / `-` / `0` keys; drag, scroll or pinch to pan/adjust |
+| Check what you're reading | the **Menu** — the filename and folder sit at its top (long names scroll) |
 | Page gap, pin toolbar, fullscreen, theme | the **Menu** (and the `f` key for fullscreen) |
 | Light / dark | the ☀/🌙 button (library) or **Menu → … mode** (reader) |
 

@@ -96,25 +96,28 @@ const act = (over) =>
 
 test("reportAction never writes while the resume pill is unanswered", () => {
   assert.equal(act({ armed: false }), "skip");
-  assert.equal(act({ armed: false, page: 99 }), "skip"); // not even a finish
+  assert.equal(act({ armed: false, page: 99 }), "skip"); // not even the last page
 });
 
 test("reportAction records mid-comic pages, skips page 0", () => {
   assert.equal(act({}), "record");
   assert.equal(act({ page: 1 }), "record");
   // page 0 = nothing to resume; also means glancing at a comic writes nothing
-  // and can never clobber a saved position with 0.
+  // and can never clobber a saved position with 0 (the tombstone encoding).
   assert.equal(act({ page: 0 }), "skip");
 });
 
-test("reportAction finishes on the last page (deletes the record)", () => {
-  assert.equal(act({ page: 99 }), "finish");
-  assert.equal(act({ page: 0, pageCount: 1 }), "finish"); // single-page comic
+test("reportAction records the LAST page too — finishing keeps the chip at n/n", () => {
+  // Your place in a series is "at the end of this issue" (where the end card
+  // offers the next one); the record hands off later, it is not deleted here.
+  assert.equal(act({ page: 99 }), "record");
+  // A single-page comic's only page is page 0 — never recorded (page-0 rule).
+  assert.equal(act({ page: 0, pageCount: 1 }), "skip");
 });
 
-test("reportAction does not finish on the first tick of an explicit-page open", () => {
+test("reportAction skips the first tick of an explicit open onto the last page", () => {
   // A chip/deep link clamped past a shrunken re-scan lands on the last page
-  // without the user reading anything — the record must survive.
+  // without the user reading anything — it must not overwrite the position.
   assert.equal(act({ page: 99, firstTickAfterExplicitOpen: true }), "skip");
   // …but a normal explicit open mid-comic still records immediately.
   assert.equal(act({ page: 42, firstTickAfterExplicitOpen: true }), "record");

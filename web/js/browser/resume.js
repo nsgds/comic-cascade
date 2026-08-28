@@ -37,9 +37,13 @@ export function renderResumeRow(container, ctx) {
 
       const open = el("button", "resume-chip-open");
       open.title = item.path;
+      // A finished comic keeps its chip (your place in the series is "at the
+      // end of this issue", where the end card offers the next) — ✓ marks it.
+      const done = item.page >= item.total - 1;
       open.append(
         el("span", "resume-chip-name", title(item.path)),
-        el("span", "resume-chip-pos", `p. ${item.page + 1} / ${item.total}`),
+        el("span", "resume-chip-pos",
+          `${done ? "✓ " : ""}p. ${item.page + 1} / ${item.total}`),
       );
       open.addEventListener("click", () => ctx.onOpen(item));
 
