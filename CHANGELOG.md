@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.4.1 — 2026-09-19
+
+- **Large PDFs open again.** Pages are now rendered at 144 DPI *or* whatever
+  scale keeps them under a pixel budget (`max_page_pixels`, default 8 million),
+  whichever is smaller. Print-resolution PDFs define pages tens of inches wide,
+  where 144 DPI meant a 40–80 megapixel bitmap — hundreds of MB for a single
+  page, which exhausted a memory-limited container mid-extraction and killed the
+  server process. The reader saw that as a proxy `502` ("can't open this comic")
+  with nothing in the app's log, since the process died before it could answer.
+  Rendered pages stay around 2500×3300 — above what any screen or the reader's
+  zoom can use.
+- Each page's bitmap is released before the next is rendered, and the document
+  itself is reopened periodically — pdfium keeps every parsed stream while a
+  document is open, so peak memory otherwise tracked the *file's* size rather
+  than the page budget. A 2 GB, 217-page book peaked at 1961 MB before and 692 MB
+  after (and renders faster); a 161-page book that died at page 55 under a 1 GB
+  limit now completes with a 445 MB peak.
+- **PDF rendering is serialized.** pdfium is not thread-safe, and extracting two
+  large PDFs at once could kill the whole process; other formats still extract
+  concurrently.
+- Half-written extraction directories left behind by a killed process are swept
+  at startup. They were invisible to the cache index and never reclaimed.
+- The per-comic byte cap (`max_archive_bytes`) now bounds **rendered PDF output**
+  too, not just archive extraction.
+- New setting: `[server] max_page_pixels` / `CASCADE_MAX_PAGE_PIXELS`. Existing
+  cached comics are unaffected (the cache is not re-rendered).
+
 ## 0.4.0 — 2026-08-28
 
 - **"Up next" end card** — scrolling past a comic's last page reveals a card

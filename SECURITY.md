@@ -23,7 +23,16 @@ What the app *does* defend against — even for an allowed/LAN user, and for an
 - **Symlink smuggling** — symlinks inside a RAR/7z are never followed or served;
   only regular files that resolve *inside* the extraction dir are used.
 - **Decompression bombs** — extraction is capped by `max_archive_bytes` (total
-  uncompressed) and PDFs by `max_pdf_pages`; oversized comics are rejected `422`.
+  uncompressed, and rendered output for a PDF) and PDFs by `max_pdf_pages`;
+  oversized comics are rejected `422`.
+- **Memory exhaustion while rendering** — a PDF page's *rendered* size is capped by
+  `max_page_pixels`, bounding both its area and its long axis (a page declared
+  0.001 × 1,000,000 pt passes an area-only test at full scale). Oversized pages are
+  rendered smaller rather than rejected. The renderer also reopens the document
+  periodically, since pdfium retains parsed streams and peak memory otherwise
+  tracks the file's size, and serializes all pdfium work, which is not thread-safe.
+  Without these, a crafted or merely large PDF can take the process down on a
+  memory-limited host — which surfaces to users as a proxy error, not a `422`.
 - **Command injection** — `unar` is run with an argument list (never a shell) and a
   `--` end-of-options separator; a single output file is size-limited via `RLIMIT_FSIZE`.
 - **SQL injection** — all queries against the cache index and the per-user

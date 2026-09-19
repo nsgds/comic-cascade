@@ -36,3 +36,19 @@ def test_auth_settings_reads_uid_header_from_env(monkeypatch):
     monkeypatch.setenv("CASCADE_UID_HEADER", "   ")
     *_, uid_header = _auth_settings()
     assert uid_header is None  # blank collapses to unset
+
+
+def test_scalar_settings_reads_page_pixel_cap_from_env(monkeypatch):
+    from app.config import DEFAULT_MAX_PAGE_PIXELS, _scalar_settings
+
+    monkeypatch.delenv("CASCADE_MAX_PAGE_PIXELS", raising=False)
+    *_, max_page_pixels = _scalar_settings()
+    assert max_page_pixels == DEFAULT_MAX_PAGE_PIXELS
+
+    monkeypatch.setenv("CASCADE_MAX_PAGE_PIXELS", "2000000")
+    *_, max_page_pixels = _scalar_settings()
+    assert max_page_pixels == 2_000_000
+
+    monkeypatch.setenv("CASCADE_MAX_PAGE_PIXELS", "0")
+    *_, max_page_pixels = _scalar_settings()
+    assert max_page_pixels == 1  # clamped: a zero budget would render nothing

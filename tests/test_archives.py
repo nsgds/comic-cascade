@@ -1,4 +1,5 @@
 import io
+import math
 import zipfile
 from pathlib import Path
 
@@ -6,10 +7,13 @@ import pytest
 from PIL import Image
 
 from app.archives import (
+    PDF_REOPEN_INTERVAL,
+    PDF_RENDER_SCALE,
     ArchiveError,
     _collect_images,
     extract_to,
     page_dimensions,
+    pdf_page_scale,
     sniff_format,
 )
 
@@ -18,6 +22,21 @@ def _jpeg(w, h):
     buf = io.BytesIO()
     Image.new("RGB", (w, h), (128, 128, 128)).save(buf, "JPEG")
     return buf.getvalue()
+
+
+def _pdf(path, w, h, pages=1, widen=0):
+    """A PDF whose page box is w x h POINTS (resolution=72 => 1px == 1pt).
+
+    ``widen`` grows each successive page by that many points, so page order is
+    recoverable from the rendered dimensions alone.
+    """
+    imgs = [
+        Image.new("RGB", (w + i * widen, h), (200, 100, 50)) for i in range(pages)
+    ]
+    imgs[0].save(
+        path, "PDF", resolution=72, save_all=True, append_images=imgs[1:]
+    )
+    return path
 
 
 def test_sniff_format(tmp_path):
@@ -83,6 +102,71 @@ def test_corrupt_pdf_raises_archive_error(tmp_path):
     src.write_bytes(b"%PDF-1.7\nnot really a pdf body")
     with pytest.raises(ArchiveError):
         extract_to(src, tmp_path / "out")
+
+
+def test_pdf_page_scale_caps_output_pixels():
+    """A page small enough renders at the target scale; a big one is scaled to fit
+    the pixel budget — the guard against 80-megapixel print-resolution pages."""
+    assert pdf_page_scale((612, 792), 8_000_000) == PDF_RENDER_SCALE  # US Letter
+    scale = pdf_page_scale((2859, 3750), 8_000_000)  # 39in wide, ~43MP at 2.0
+    assert scale < PDF_RENDER_SCALE
+    assert 2859 * scale * 3750 * scale == pytest.approx(8_000_000, rel=0.01)
+    # Degenerate boxes must not raise.
+    assert pdf_page_scale((0, 0), 8_000_000) == PDF_RENDER_SCALE
+
+    # An extreme aspect ratio passes the AREA test at full scale while its long
+    # axis alone busts the budget — the cap must bound that axis too. (No minimum
+    # scale: pdfium ceils each axis, so even a tiny scale renders >= 1px.)
+    for box in ((0.001, 1_000_000), (1, 20_000_000), (5000, 0.5)):
+        scale = pdf_page_scale(box, 8_000_000)
+        rendered = math.ceil(box[0] * scale) * math.ceil(box[1] * scale)
+        assert rendered <= 8_000_000 + math.ceil(box[0] * scale) + math.ceil(box[1] * scale)
+
+
+def test_pdf_render_respects_page_pixel_cap(tmp_path):
+    """An oversized page is rendered smaller rather than allocating a bitmap big
+    enough to get the process OOM-killed mid-extraction (which reaches the reader
+    as a dead upstream, not an error)."""
+    src = _pdf(tmp_path / "big.pdf", 800, 1000)
+
+    fmt, pages = extract_to(src, tmp_path / "out", max_page_pixels=500_000)
+    assert fmt == "pdf"
+    dims = page_dimensions(tmp_path / "out", pages)[0]
+    # +w+h: pdfium rounds each axis up to a whole pixel, so the budget can be
+    # exceeded by at most one row plus one column.
+    assert dims["w"] * dims["h"] <= 500_000 + dims["w"] + dims["h"]
+
+    # Control: with headroom the same page renders at the full target scale.
+    _, pages = extract_to(src, tmp_path / "out2", max_page_pixels=8_000_000)
+    dims = page_dimensions(tmp_path / "out2", pages)[0]
+    assert (dims["w"], dims["h"]) == (int(800 * PDF_RENDER_SCALE), int(1000 * PDF_RENDER_SCALE))
+
+
+def test_pdf_longer_than_reopen_interval_renders_every_page_in_order(tmp_path):
+    """The renderer reopens the document periodically to bound memory; no page may
+    be skipped, repeated or reordered across a reopen boundary."""
+    n = PDF_REOPEN_INTERVAL * 2 + 3
+    src = _pdf(tmp_path / "long.pdf", 60, 80, pages=n, widen=1)
+
+    _, pages = extract_to(src, tmp_path / "out")
+    assert len(pages) == n
+    dims = page_dimensions(tmp_path / "out", pages)
+    widths = [d["w"] for d in dims]
+    assert widths == sorted(widths)  # strictly increasing == original order
+    assert len(set(widths)) == n     # no page rendered twice
+
+
+def test_pdf_rendered_size_capped_by_max_bytes(tmp_path):
+    """max_bytes bounds rendered PDF output too, not just archive extraction."""
+    src = _pdf(tmp_path / "long.pdf", 800, 1000, pages=3)
+    with pytest.raises(ArchiveError):
+        extract_to(src, tmp_path / "out", max_bytes=1024)
+
+
+def test_pdf_page_count_cap(tmp_path):
+    src = _pdf(tmp_path / "long.pdf", 200, 300, pages=3)
+    with pytest.raises(ArchiveError):
+        extract_to(src, tmp_path / "out", max_pages=2)
 
 
 def test_collect_images_skips_symlinks_and_escapes(tmp_path):

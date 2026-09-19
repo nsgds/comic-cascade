@@ -79,6 +79,7 @@ CACHE = ArchiveCache(
     _cfg.extract_concurrency,
     max_archive_bytes=_cfg.max_archive_bytes,
     max_pdf_pages=_cfg.max_pdf_pages,
+    max_page_pixels=_cfg.max_page_pixels,
 )
 
 PROGRESS = ProgressStore(_cfg.cache_dir / "progress.db")

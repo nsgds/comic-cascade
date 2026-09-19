@@ -31,6 +31,7 @@ DEFAULT_EXTRACT_CONCURRENCY = 2
 # Per-archive extraction guards against decompression bombs / pathological files.
 DEFAULT_MAX_ARCHIVE_BYTES = 4_000_000_000  # max total uncompressed size per comic
 DEFAULT_MAX_PDF_PAGES = 3000               # refuse to render absurdly long PDFs
+DEFAULT_MAX_PAGE_PIXELS = 8_000_000        # max output pixels per rendered PDF page
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,7 @@ class Config:
     extract_concurrency: int
     max_archive_bytes: int
     max_pdf_pages: int
+    max_page_pixels: int
     browse_root: Path | None  # set => UI library management enabled, bounded here
     user_header: str | None   # trusted proxy identity header (e.g. X-Remote-User); off by default
     admins: frozenset[str]     # if non-empty, only these users may manage libraries
@@ -126,13 +128,14 @@ def _libraries_from_pairs() -> list[tuple[str, Path]]:
     return []
 
 
-def _scalar_settings() -> tuple[Path, int, int, int, int]:
+def _scalar_settings() -> tuple[Path, int, int, int, int, int]:
     """cache dir / budget / concurrency / extraction limits from config then env."""
     cache_dir = DEFAULT_CACHE_DIR
     budget = DEFAULT_BUDGET_BYTES
     concurrency = DEFAULT_EXTRACT_CONCURRENCY
     max_archive_bytes = DEFAULT_MAX_ARCHIVE_BYTES
     max_pdf_pages = DEFAULT_MAX_PDF_PAGES
+    max_page_pixels = DEFAULT_MAX_PAGE_PIXELS
 
     config_file = _find_config_file()
     if config_file is not None:
@@ -145,13 +148,22 @@ def _scalar_settings() -> tuple[Path, int, int, int, int]:
         concurrency = int(server.get("extract_concurrency", concurrency))
         max_archive_bytes = int(server.get("max_archive_bytes", max_archive_bytes))
         max_pdf_pages = int(server.get("max_pdf_pages", max_pdf_pages))
+        max_page_pixels = int(server.get("max_page_pixels", max_page_pixels))
 
     cache_dir = os.environ.get("CASCADE_CACHE_DIR", cache_dir)
     budget = int(os.environ.get("CASCADE_CACHE_BUDGET", budget))
     concurrency = int(os.environ.get("CASCADE_EXTRACT_CONCURRENCY", concurrency))
     max_archive_bytes = int(os.environ.get("CASCADE_MAX_ARCHIVE_BYTES", max_archive_bytes))
     max_pdf_pages = int(os.environ.get("CASCADE_MAX_PDF_PAGES", max_pdf_pages))
-    return Path(cache_dir), budget, max(1, concurrency), max(1, max_archive_bytes), max(1, max_pdf_pages)
+    max_page_pixels = int(os.environ.get("CASCADE_MAX_PAGE_PIXELS", max_page_pixels))
+    return (
+        Path(cache_dir),
+        budget,
+        max(1, concurrency),
+        max(1, max_archive_bytes),
+        max(1, max_pdf_pages),
+        max(1, max_page_pixels),
+    )
 
 
 def _coerce_name_list(raw, key: str) -> list[str]:
@@ -238,7 +250,14 @@ def _browse_root() -> Path | None:
 @lru_cache(maxsize=1)
 def get_config() -> Config:
     libraries = tuple(_assign_ids(_libraries_from_pairs()))
-    cache_dir, budget, concurrency, max_archive_bytes, max_pdf_pages = _scalar_settings()
+    (
+        cache_dir,
+        budget,
+        concurrency,
+        max_archive_bytes,
+        max_pdf_pages,
+        max_page_pixels,
+    ) = _scalar_settings()
     user_header, admins, groups_header, admin_groups, uid_header = _auth_settings()
     return Config(
         libraries=libraries,
@@ -247,6 +266,7 @@ def get_config() -> Config:
         extract_concurrency=concurrency,
         max_archive_bytes=max_archive_bytes,
         max_pdf_pages=max_pdf_pages,
+        max_page_pixels=max_page_pixels,
         browse_root=_browse_root(),
         user_header=user_header,
         admins=admins,

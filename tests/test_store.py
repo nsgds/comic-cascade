@@ -14,6 +14,7 @@ def _config(tmp_path, browse_root):
         extract_concurrency=1,
         max_archive_bytes=4_000_000_000,
         max_pdf_pages=3000,
+        max_page_pixels=8_000_000,
         browse_root=browse_root,
         user_header=None,
         admins=frozenset(),

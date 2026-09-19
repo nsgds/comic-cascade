@@ -40,6 +40,7 @@ class ArchiveCache:
         concurrency: int,
         max_archive_bytes: int = 4_000_000_000,
         max_pdf_pages: int = 3000,
+        max_page_pixels: int = 8_000_000,
     ):
         self.root = Path(cache_dir)
         self.archives = self.root / "archives"
@@ -48,11 +49,13 @@ class ArchiveCache:
         self.budget = budget_bytes
         self.max_archive_bytes = max_archive_bytes
         self.max_pdf_pages = max_pdf_pages
+        self.max_page_pixels = max_page_pixels
         self.archives.mkdir(parents=True, exist_ok=True)
         self.meta.mkdir(parents=True, exist_ok=True)
 
         self._db_lock = threading.Lock()
         self._init_db()
+        self._sweep_orphans()
 
         # WeakValueDictionary: a per-archive lock is collected once no opener holds
         # it, so the map can't grow without bound across many distinct comics.
@@ -61,6 +64,22 @@ class ArchiveCache:
         )
         self._locks_guard = asyncio.Lock()
         self._sem = asyncio.Semaphore(max(1, concurrency))
+
+    def _sweep_orphans(self) -> None:
+        """Delete extraction dirs that have no meta file.
+
+        Such a dir is a half-written extraction whose process died before it could
+        clean up (an OOM kill leaves no chance to run ``except``), so it is invisible
+        to both the reader and the LRU index while still occupying the volume. Safe
+        ONLY here, at construction: once serving, a meta-less dir is an extraction
+        in flight.
+        """
+        try:
+            for d in self.archives.iterdir():
+                if d.is_dir() and not (self.meta / f"{d.name}.json").exists():
+                    shutil.rmtree(d, ignore_errors=True)
+        except OSError:  # unreadable cache dir is the caller's problem, not fatal here
+            pass
 
     # ---- public API -------------------------------------------------------
 
@@ -107,7 +126,11 @@ class ArchiveCache:
             shutil.rmtree(dest, ignore_errors=True)
         try:
             fmt, pages = extract_to(
-                src, dest, max_bytes=self.max_archive_bytes, max_pages=self.max_pdf_pages
+                src,
+                dest,
+                max_bytes=self.max_archive_bytes,
+                max_pages=self.max_pdf_pages,
+                max_page_pixels=self.max_page_pixels,
             )
             dims = page_dimensions(dest, pages)
         except ArchiveError:

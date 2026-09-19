@@ -10,7 +10,7 @@ described here, update this file **in the same commit**.
 
 ## 1. What this is
 
-**Status: v0.4.0.** A minimal, self-hostable comic reader (0BSD): browse
+**Status: v0.4.1.** A minimal, self-hostable comic reader (0BSD): browse
 folders of CBZ/CBR/PDF files, read them in the browser, resume where you left
 off. The guiding constraint throughout is **a fast reader, not a platform** —
 no accounts, no metadata scraping, no collections, no server-side rendering of
@@ -85,7 +85,8 @@ writes into a library.
 **Dispatch is by content sniff, not extension** — real-world `.cbz` files are
 sometimes 7-Zip or RAR containers (a mislabeled "zip" that fails to open falls
 through to `unar`). ZIP extracts in-process via `zipfile`; RAR/7z/unknown go
-through `unar`; PDF renders via `pypdfium2` at 144 DPI.
+through `unar`; PDF renders via `pypdfium2` at 144 DPI, **capped to
+`max_page_pixels` (8 M) of output per page**.
 
 Hardening (see SECURITY.md for the threat model):
 
@@ -95,7 +96,27 @@ Hardening (see SECURITY.md for the threat model):
   then enforces the same cap during the copy (headers can lie). `unar` runs
   under an `RLIMIT_FSIZE` cap, a timeout (also covers password prompts), `--`
   end-of-options (a path can never parse as a flag), and a post-extraction
-  tree-size check. PDFs have a page cap.
+  tree-size check. PDFs have a page cap, a rendered-bytes cap (the same
+  `max_bytes` budget, counted as pages are written), and a per-page PIXEL cap.
+- **PDF memory is a failure the API cannot express.** Exceed the host's memory
+  limit and the process is OOM-killed mid-extraction: the reader sees a dead
+  upstream (a proxy `502`), never a `422`, and nothing is logged because the
+  process died before it could answer. Three independent drivers, each capped:
+  1. **Page size.** A print-resolution page is tens of inches wide, so 144 DPI
+     yields a 40–80 megapixel bitmap. The scale is therefore derived per page
+     from its point size (`pdf_page_scale`, pure and tested), bounding both the
+     area and the long axis — an extreme aspect ratio passes an area-only test
+     at full scale.
+  2. **Document retention.** pdfium keeps every parsed stream for the lifetime of
+     a `PdfDocument`, so peak memory tracks the FILE's size, not the page budget:
+     a 2 GB book of 1.4-megapixel pages still peaked at ~2 GB. The renderer
+     reopens the document every `PDF_REOPEN_INTERVAL` pages, which bounds that at
+     one chunk (measured 1961 MB → 692 MB, and slightly *faster*).
+  3. **Concurrency.** pdfium is not thread-safe and extraction runs in worker
+     threads, so all pdfium work is serialized on a module lock. Two large PDFs
+     extracting at once reliably killed the process.
+  Per-page buffers (pdfium bitmap, PIL copy) are released before the next page
+  renders, so within a chunk peak memory is one page rather than the book.
 - **Symlink smuggling**: only regular files that physically resolve inside the
   extraction dir are collected — an archive containing `page.jpg -> /etc/passwd`
   serves nothing.
@@ -290,7 +311,8 @@ extraction concurrency, per-archive byte cap, PDF page cap).
 ## 11. Testing
 
 Python (`pytest`, `tests/`): API surface + confinement (`test_api.py`),
-extraction + bomb/symlink guards (`test_archives.py`), management gating
+extraction + bomb/symlink guards + the PDF page/pixel/byte caps
+(`test_archives.py`), management gating
 (`test_auth.py`), config resolution (`test_config.py`), both progress tiers'
 server half — keys, tombstones, hide-vs-prune (`test_progress.py`), the
 library store (`test_store.py`), natural sort (`test_util.py`). Real `unar`
@@ -320,6 +342,19 @@ over every ES module, the JS tests, and a Docker image build.
   single-user convenience, not a missing check (§6).
 - **Never-upscale is a LAYOUT rule**: layout never upscales a page; the
   explicit zoom overlay may (up to `max(3×, native 1:1)`). Don't "unify" them.
+- **The three PDF memory guards are load-bearing, not quality knobs** (§5): the
+  per-page pixel cap, the periodic document reopen, and the pdfium lock. Drop any
+  one and a big PDF can OOM-kill the process, which reaches the user as a proxy
+  `502` with nothing in the app log. Measured peak with all three: ~0.7 GB for a
+  2 GB, 217-page book; ~0.35 GB for two books extracting at once. **Peak tracks
+  the PDF's file size, not its page count or pixel budget** — sizing advice based
+  on pixels is wrong. The pixel cap is a *budget*, honored to within one row plus
+  one column (pdfium rounds each axis up); it needs no minimum scale for the same
+  reason.
+- **`_sweep_orphans` runs at construction only.** An extraction dir with no meta
+  file is garbage *then* (a process that died mid-extraction cleans nothing up),
+  but mid-run it is an extraction in flight. Calling it from anywhere else
+  deletes a comic out from under its reader.
 - **The reading view sets `maximum-scale=1, user-scalable=no`** (swapped in on
   reader build, restored on teardown) and it is load-bearing, not an a11y
   oversight: during a scroll/fling Chrome delivers NON-cancelable touchmoves,

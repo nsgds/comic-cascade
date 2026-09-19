@@ -155,8 +155,26 @@ absurdly long PDFs). A comic that exceeds these is rejected with a `422`.
 
 | Setting | TOML | Env | Default |
 |---|---|---|---|
-| Max uncompressed bytes per comic | `[server] max_archive_bytes` | `CASCADE_MAX_ARCHIVE_BYTES` | `4000000000` |
+| Max bytes per comic (uncompressed, or rendered for a PDF) | `[server] max_archive_bytes` | `CASCADE_MAX_ARCHIVE_BYTES` | `4000000000` |
 | Max PDF pages rendered | `[server] max_pdf_pages` | `CASCADE_MAX_PDF_PAGES` | `3000` |
+| Max output pixels per rendered PDF page | `[server] max_page_pixels` | `CASCADE_MAX_PAGE_PIXELS` | `8000000` |
+
+`max_page_pixels` is a **memory** guard rather than a rejection: PDF pages render
+at 144 DPI unless that would exceed this many pixels, in which case the page is
+rendered smaller instead. Print-resolution PDFs define pages tens of inches wide,
+where 144 DPI means a 40–80 megapixel bitmap (hundreds of MB) per page — enough to
+get the process OOM-killed mid-extraction on a memory-capped container, which
+reaches the reader as a failed request rather than a clean error. The default
+leaves pages around 2500×3300 — more than any screen, and more than the reader's
+zoom (up to 3× or native) can use. Changing it does not re-render comics already in
+the cache.
+
+Sizing memory: **peak extraction memory tracks the PDF's file size**, not its page
+count or this pixel budget, because pdfium keeps parsed streams for as long as the
+document is open. The renderer reopens the document periodically to bound that, and
+serializes PDF work (pdfium is not thread-safe), so measured peaks are ~0.7 GB for a
+2 GB book and ~0.35 GB for two extractions at once. Budget ~1 GB of headroom for
+PDF libraries; raising `max_page_pixels` adds to it on top.
 
 ## Environment variables (summary)
 
@@ -174,7 +192,8 @@ absurdly long PDFs). A comic that exceeds these is rejected with a `422`.
 | `CASCADE_CACHE_DIR` | Cache directory (default `/cache`) |
 | `CASCADE_CACHE_BUDGET` | Cache size budget in bytes |
 | `CASCADE_EXTRACT_CONCURRENCY` | Max simultaneous archive extractions (default 2) |
-| `CASCADE_MAX_ARCHIVE_BYTES` | Max uncompressed size per comic (default 4 GB) |
+| `CASCADE_MAX_ARCHIVE_BYTES` | Max size per comic — uncompressed, or rendered for a PDF (default 4 GB) |
 | `CASCADE_MAX_PDF_PAGES` | Max PDF pages rendered (default 3000) |
+| `CASCADE_MAX_PAGE_PIXELS` | Max output pixels per rendered PDF page (default 8 million) |
 
 Environment variables override the corresponding TOML values.

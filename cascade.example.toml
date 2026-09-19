@@ -26,6 +26,10 @@ budget_bytes = 6_000_000_000
 [server]
 # Max archives extracted simultaneously (caps CPU/memory/IO).
 extract_concurrency = 2
+# Max output pixels per rendered PDF page. Print-resolution PDFs would otherwise
+# render 40+ megapixel bitmaps and can exhaust a memory-capped container. See
+# CONFIG.md before raising it.
+max_page_pixels = 8_000_000
 
 # [browse]
 # Setting a browse root ENABLES adding/removing libraries from the UI, confined to

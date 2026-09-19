@@ -1,9 +1,19 @@
+<img src="web/favicon.svg" width="76" alt="">
+
 # Comic Cascade
 
 A minimal, self-hosted comic & manga reader. Point it at a folder of comics and
 read them in your browser as **one smooth, endless scroll** — no page-flipping,
 no apps, nothing between you and the pages. No accounts and no tracking: the
 only thing it ever records is your own reading position.
+
+<p align="center">
+  <img src="docs/screenshots/reader.jpg" width="320" alt="A comic open in the reader, mid-scroll between two pages">
+  <img src="docs/screenshots/browse.png" width="320" alt="Browsing a library: the folder tree and a continue-reading row">
+</p>
+
+<p align="center"><em>The reader mid-scroll, and the library browser. Phones are a
+first-class client, not an afterthought.</em></p>
 
 > ⚠️ **Comic Cascade has no authentication of its own.** Don't expose it directly
 > to the internet — put it behind your own reverse proxy / SSO. See
@@ -142,6 +152,12 @@ groups, and store reading positions per user — see
 as trustworthy as your setup: the proxy must set them itself, strip any
 client-supplied copies, and be the only way to reach the app.
 
+Give the container **2 GB of memory** if your libraries contain large PDFs (1 GB
+is comfortable otherwise). Extraction is the hungry path, and a PDF's cost tracks
+its **file size** rather than its page count — see
+[CONFIG.md](CONFIG.md#extraction-limits). If the container is killed while opening
+a comic, that is the budget to look at first.
+
 The container runs as a **non-root** user (UID 1000). A fresh named volume mounted
 at `/cache` inherits the right ownership automatically; if you **bind-mount** a host
 directory for the cache instead, `chown 1000:1000` it (or set `user:` in compose to
@@ -192,4 +208,6 @@ project's — exactly like any Linux distro shipping GPL binaries.
 
 ## License
 
-[0BSD](LICENSE) — Zero-Clause BSD.
+[0BSD](LICENSE) — Zero-Clause BSD. The `LICENSE` file is the canonical text
+verbatim: adding anything above it (even a "Zero-Clause BSD" heading) drops it
+below GitHub's license-detection threshold and the repo reads as "Other".

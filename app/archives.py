@@ -11,8 +11,10 @@ actually 7-zip or RAR archives.
 
 from __future__ import annotations
 
+import math
 import shutil
 import subprocess
+import threading
 import zipfile
 from pathlib import Path
 
@@ -25,6 +27,14 @@ from .util import ext_of, is_image, natural_sort_key
 
 UNAR_TIMEOUT = 300  # seconds; guards against password prompts / pathological archives
 PDF_RENDER_SCALE = 2.0  # 144 DPI (72 * 2); good balance of sharpness vs size
+# Three guards against PDF rendering exhausting memory, which kills the process
+# mid-extraction rather than raising (OVERVIEW.md §5): a per-page output ceiling,
+# a periodic reopen (pdfium retains parsed streams for a document's lifetime, so
+# peak otherwise tracks the FILE's size), and a lock, since pdfium is not
+# thread-safe and extraction runs in worker threads.
+DEFAULT_MAX_PAGE_PIXELS = 8_000_000
+PDF_REOPEN_INTERVAL = 50
+_PDFIUM_LOCK = threading.Lock()
 _COPY_CHUNK = 256 * 1024
 
 
@@ -162,48 +172,109 @@ def _collect_images(raw: Path) -> list[Path]:
     return images
 
 
-def _render_pdf(src: Path, dest: Path, max_pages: int) -> list[str]:
+def pdf_page_scale(size: tuple[float, float], max_pixels: int) -> float:
+    """Render scale for a PDF page of ``size`` points, capped to ``max_pixels`` output.
+
+    PDF_RENDER_SCALE is the target; a page big enough to exceed the pixel budget at
+    that scale is rendered smaller instead. Both the area and the long axis are
+    bounded, so an extreme aspect ratio cannot slip past the area test. pdfium
+    rounds each axis up to a whole pixel, so the budget holds to within one row
+    plus one column — and that rounding is also why no minimum scale is needed:
+    ceil() renders at least 1px per axis however small the scale gets.
+    """
+    w_pt, h_pt = size
+    if w_pt <= 0 or h_pt <= 0:
+        return PDF_RENDER_SCALE
+    return min(
+        PDF_RENDER_SCALE,
+        math.sqrt(max_pixels / (w_pt * h_pt)),
+        # A sliver page (0.001 x 1000000 pt) passes the area test at full scale
+        # while its long axis alone exceeds the budget; bound that axis too.
+        max_pixels / max(w_pt, h_pt),
+    )
+
+
+def _render_page(pdf, index: int, max_pixels: int):
+    """One PDF page as a PIL image, releasing pdfium's own buffers before returning
+    — peak memory is one page, not the whole book."""
+    page = pdf[index]
+    try:
+        bitmap = page.render(scale=pdf_page_scale(page.get_size(), max_pixels))
+        try:
+            return bitmap.to_pil().convert("RGB")  # copies, so the bitmap can go
+        finally:
+            bitmap.close()
+    finally:
+        page.close()
+
+
+def _open_pdf(src: Path):
     import pypdfium2 as pdfium
 
     try:
-        pdf = pdfium.PdfDocument(str(src))
+        return pdfium.PdfDocument(str(src))
     except Exception:  # corrupt / encrypted
         raise ArchiveError("cannot open PDF (corrupt or password-protected)")
-    pages: list[str] = []
-    try:
-        n = len(pdf)
-        if n > max_pages:
-            raise ArchiveError(f"PDF has too many pages ({n} > {max_pages})")
-        for i in range(n):
-            try:
-                bitmap = pdf[i].render(scale=PDF_RENDER_SCALE)
-                pil = bitmap.to_pil().convert("RGB")
-            except ArchiveError:
-                raise
-            except Exception:  # a single malformed page shouldn't 500 the request
-                raise ArchiveError(f"failed to render PDF page {i}")
-            out = f"{i:05d}.jpg"
-            pil.save(dest / out, "JPEG", quality=85)
-            pages.append(out)
-    finally:
-        pdf.close()
-    return pages
+
+
+def _render_pdf(
+    src: Path, dest: Path, max_pages: int, max_pixels: int, max_bytes: int
+) -> list[str]:
+    with _PDFIUM_LOCK:
+        pdf = _open_pdf(src)
+        pages: list[str] = []
+        remaining = max_bytes
+        try:
+            n = len(pdf)
+            if n > max_pages:
+                raise ArchiveError(f"PDF has too many pages ({n} > {max_pages})")
+            for i in range(n):
+                if i and i % PDF_REOPEN_INTERVAL == 0:
+                    pdf.close()  # release what pdfium has parsed so far
+                    pdf = _open_pdf(src)
+                out = f"{i:05d}.jpg"
+                try:
+                    pil = _render_page(pdf, i, max_pixels)
+                except ArchiveError:
+                    raise
+                except Exception:  # a malformed page shouldn't 500 the request
+                    raise ArchiveError(f"failed to render PDF page {i}")
+                try:
+                    # Outside the except above: a write failure is a disk problem,
+                    # and must reach the caller as one rather than as a bad page.
+                    pil.save(dest / out, "JPEG", quality=85)
+                finally:
+                    pil.close()
+                remaining -= (dest / out).stat().st_size
+                if remaining < 0:
+                    raise ArchiveError("PDF too large (rendered size exceeds limit)")
+                pages.append(out)
+        finally:
+            pdf.close()
+        return pages
 
 
 def extract_to(
-    src: Path, dest: Path, *, max_bytes: int = 4_000_000_000, max_pages: int = 3000
+    src: Path,
+    dest: Path,
+    *,
+    max_bytes: int = 4_000_000_000,
+    max_pages: int = 3000,
+    max_page_pixels: int = DEFAULT_MAX_PAGE_PIXELS,
 ) -> tuple[str, list[str]]:
     """Extract all page images from ``src`` into ``dest``.
 
-    ``max_bytes`` caps the total uncompressed size (decompression-bomb guard) and
-    ``max_pages`` caps PDF page rendering. Returns ``(format, page_filenames)``.
-    Raises :class:`ArchiveError` on failure or if no readable pages are found.
+    ``max_bytes`` caps the total extracted size — uncompressed bytes for an archive,
+    rendered JPEG bytes for a PDF (both decompression-bomb guards). ``max_pages``
+    caps PDF page count and ``max_page_pixels`` caps each rendered page's output
+    pixels. Returns ``(format, page_filenames)``. Raises :class:`ArchiveError` on
+    failure or if no readable pages are found.
     """
     dest.mkdir(parents=True, exist_ok=True)
     fmt = sniff_format(src)
 
     if fmt == "pdf":
-        pages = _render_pdf(src, dest, max_pages)
+        pages = _render_pdf(src, dest, max_pages, max_page_pixels, max_bytes)
     elif fmt == "zip":
         try:
             pages = _extract_zip(src, dest, max_bytes)
